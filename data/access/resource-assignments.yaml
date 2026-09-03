@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Vinay Agarwal
+# Maps selected real documentation sources to synthetic protected resources for access tests.
+
+version: access-v0
+assignments:
+  - source_document: authorization-models
+    tenant_id: tenant:acme
+    resource_id: document:acme-rollout
+  - source_document: authorization-models
+    tenant_id: tenant:beta
+    resource_id: document:beta-rollout
+  - source_document: relationship-tuples
+    tenant_id: tenant:acme
+    resource_id: document:acme-secret

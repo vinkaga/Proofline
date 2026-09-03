@@ -8,8 +8,6 @@ adapter makes boundary cases deterministic in unit tests. The OpenFGA adapter
 keeps the production-shaped decision path separate from the LLM and corpus.
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Protocol
 
@@ -17,7 +15,7 @@ from openfga_sdk import OpenFgaClient
 from openfga_sdk.client.models.check_request import ClientCheckRequest
 from openfga_sdk.client.models.list_objects_request import ClientListObjectsRequest
 
-from proofline.domain import AccessScope, Principal
+from proofline.domain import AccessScope, Principal, ScopedResource
 
 
 class AuthorizationAdapter(Protocol):
@@ -34,13 +32,14 @@ class AuthorizationAdapter(Protocol):
         principal: Principal,
         relation: str,
         resource_id: str,
+        tenant_id: str,
     ) -> bool: ...
 
 
 class StaticAuthorizationAdapter:
     """A deterministic adapter for unit tests and fixture-driven evaluation."""
 
-    def __init__(self, permissions: Mapping[tuple[str, str], frozenset[str]]) -> None:
+    def __init__(self, permissions: Mapping[tuple[str, str], tuple[ScopedResource, ...]]) -> None:
         self._permissions = permissions
 
     async def list_permitted_resources(
@@ -51,7 +50,10 @@ class StaticAuthorizationAdapter:
         return AccessScope(
             tenant_id=tenant_id,
             resource_ids=tuple(
-                sorted(self._permissions.get((principal.id, tenant_id), frozenset()))
+                sorted(
+                    resource.resource_id
+                    for resource in self._permissions.get((principal.id, tenant_id), ())
+                )
             ),
         )
 
@@ -60,13 +62,11 @@ class StaticAuthorizationAdapter:
         principal: Principal,
         relation: str,
         resource_id: str,
+        tenant_id: str,
     ) -> bool:
         del relation
-        return any(
-            resource_id in resources
-            for (user, _), resources in self._permissions.items()
-            if user == principal.id
-        )
+        resource = ScopedResource(tenant_id=tenant_id, resource_id=resource_id)
+        return resource in self._permissions.get((principal.id, tenant_id), ())
 
 
 class OpenFgaAuthorizationAdapter:
@@ -98,7 +98,9 @@ class OpenFgaAuthorizationAdapter:
         principal: Principal,
         relation: str,
         resource_id: str,
+        tenant_id: str,
     ) -> bool:
+        del tenant_id
         response = await self._client.check(
             ClientCheckRequest(
                 user=principal.id,

@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Vinay Agarwal
+# Pins the public, Apache-2.0 source material that Proofline ingestion must use.
+
+version: corpus-v0
+retrieved_at: 2026-09-03
+access_assignments: data/access/resource-assignments.yaml
+source:
+  repository: https://github.com/openfga/openfga.dev.git
+  revision: 056865e93280715c4b1afbeae95876448218ad78
+  license: Apache-2.0
+documents:
+  - id: perform-check
+    path: docs/content/getting-started/perform-check.mdx
+    url: https://openfga.dev/docs/getting-started/perform-check
+    visibility: public
+  - id: perform-list-objects
+    path: docs/content/getting-started/perform-list-objects.mdx
+    url: https://openfga.dev/docs/getting-started/perform-list-objects
+    visibility: public
+  - id: modeling-concepts
+    path: docs/content/authorization-concepts.mdx
+    url: https://openfga.dev/docs/fga
+    visibility: public
+  - id: relationship-tuples
+    path: docs/content/concepts.mdx
+    url: https://openfga.dev/docs/concepts#what-is-a-relationship-tuple
+    visibility: public
+  - id: authorization-models
+    path: docs/content/configuration-language.mdx
+    url: https://openfga.dev/docs/configuration-language
+    visibility: public

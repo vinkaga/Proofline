@@ -8,12 +8,10 @@ candidate, citation, and tool call explicit and inspectable rather than passing
 unstructured dictionaries between system layers.
 """
 
-from __future__ import annotations
-
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 
 class RequestMode(StrEnum):
@@ -35,6 +33,15 @@ class AccessScope(BaseModel):
 
     tenant_id: str = Field(pattern=r"^tenant:[a-z0-9_-]+$")
     resource_ids: tuple[str, ...] = ()
+
+
+class ScopedResource(BaseModel):
+    """A resource identifier whose meaning is confined to one tenant."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tenant_id: str = Field(pattern=r"^tenant:[a-z0-9_-]+$")
+    resource_id: str = Field(min_length=1)
 
 
 class Citation(BaseModel):
@@ -84,3 +91,4 @@ class EvaluationCase(BaseModel):
     query: str = Field(min_length=1)
     expected_abstention: bool = False
     required_tool: str | None = None
+    model_config = ConfigDict(frozen=True)

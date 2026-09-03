@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MIT -->
+<!-- Copyright (c) 2026 Vinay Agarwal. This document explains Proofline's purpose and contracts. -->
+
 # Proofline
 
 Access-gated retrieval and bounded agent evaluation for reliable AI assistants.
@@ -54,6 +57,16 @@ A relevant answer is still a failure if it exposes the wrong evidence.
   run records candidates, scores, tool calls, citations, outcomes, latency, and
   configuration.
 
+## How Proofline differs from retrieval frameworks
+
+LangChain, LlamaIndex, Haystack, and similar frameworks can assemble retrieval,
+tool use, and evaluation components. Proofline is not a replacement for them.
+It makes a narrower contract explicit and testable: authorization constrains the
+retrieval candidate universe before model context is assembled, the agent has a
+small action budget, and protected outcomes are release-gated in CI. Evaluation
+libraries can score parts of that system, but they do not by themselves enforce
+this architecture or its security invariants.
+
 ## What it contains
 
 The corpus uses version-pinned, public OpenFGA documentation, examples, and
@@ -81,6 +94,18 @@ This is deliberately narrower than an enterprise knowledge assistant. The
 model never receives tenant-scoped content before its authorized scope is
 resolved. The goal is to make retrieval and authorization failures easy to
 reproduce and evaluate.
+
+### Threat model and limits
+
+Proofline verifies that unauthorized chunks, chunk metadata, citations, and
+prompt context do not leave the access-filtered retrieval path. Its adversarial
+cases include cross-tenant queries, identifier guessing, partial-access
+hierarchies, and instruction-like text embedded in documents.
+
+It does not claim to eliminate every information side channel. Response timing,
+result-count differences, and broader identity or transport security require
+separate production controls. Those boundaries are documented rather than
+silently treated as solved.
 
 ## Deliberate boundaries
 
@@ -114,10 +139,10 @@ they address.
 
 The agent has a small action budget: classify the question, resolve
 authorization when needed, retrieve only permitted evidence, optionally
-reformulate once when the case is retry-eligible and evidence is insufficient,
-then answer or abstain. It does not freely plan, call arbitrary tools, retrieve
-after a denial, or iterate until it appears confident. Every step is part of
-the trace and evaluation contract.
+reformulate once or decompose one retry-eligible compound question into at most
+two subqueries when evidence is insufficient, then answer or abstain. It does
+not freely plan, call arbitrary tools, retrieve after a denial, or iterate until
+it appears confident. Every step is part of the trace and evaluation contract.
 
 ### Make failure a first-class result
 
@@ -161,9 +186,9 @@ public retrieval --------> ACL-filtered retrieval ---> ranked evidence
         |                         |                         |
         +-------------------------+-------------------------+
                                   |
-               retry eligible and evidence insufficient?
+           retry eligible and evidence insufficient?
                                   |
-                         one query reformulation
+             one query reformulation or decomposition
                                   |
                                   v
                          one additional retrieval
@@ -203,8 +228,12 @@ interpret.
 
 ## Evaluation
 
-The evaluation set is hand-authored and versioned, with roughly 50 to 75 cases.
-Generated data can add stress coverage but is not the quality source of truth.
+The evaluation set has three tiers. The release suite contains roughly 50 to 75
+hand-authored, versioned cases that gate changes. An adversarial suite adds
+cross-tenant, partial-access, identifier-guessing, prompt-injection, and
+existence-inference probes. A later expansion set adds held-out, realistically
+authored questions. Generated cases may add stress coverage but are not the
+quality source of truth.
 
 | Evaluation layer | What it checks | Primary measure |
 | --- | --- | --- |
@@ -229,6 +258,7 @@ Initial case categories:
 - Tool-required questions where retrieved text alone would be insufficient.
 - Ambiguous queries where one reformulation is useful, and cases where it must
   not be attempted.
+- Cross-tenant, partial-access, and identifier-guessing probes.
 - Prompt-injection-like text embedded in the corpus, to test that documents
   are evidence rather than instructions.
 
@@ -272,6 +302,11 @@ rate, tool failures, latency, and change from baseline. This is intentionally a
 small operational surface, not a full observability platform. Its purpose is to
 make a regression or unexpected trade-off visible quickly.
 
+Every retrieval comparison also reports ingestion time and cost per 1,000
+chunks, estimated query, reranking, and response cost per 1,000 queries, and
+p50 and p95 latency. Extrapolations are labeled as such and derived from the
+measured corpus and documented model pricing.
+
 ## Technology choices
 
 Proofline uses a small, current Python stack. Each dependency supports a
@@ -279,7 +314,7 @@ specific part of the access-gated retrieval contract.
 
 | Concern | Choice | Role in Proofline |
 | --- | --- | --- |
-| Runtime and packaging | Python 3.13+ and `uv` | Modern type syntax, reproducible environments, and fast dependency management. CI tests Python 3.13 and 3.14. |
+| Runtime and packaging | Python 3.13+ and `uv` | Modern type syntax, reproducible environments, and fast dependency management. CI tests the supported baseline. |
 | Contracts | Pydantic | Typed request modes, tool arguments, traces, citations, and evaluation-case schemas. |
 | Authorization | OpenFGA and `openfga-sdk` | `ListObjects` resolves permitted scope. `Check` makes authoritative access decisions. |
 | Retrieval | Qdrant and `qdrant-client` | Local dense, hybrid, and payload-filtered retrieval. Qdrant payload filters enforce tenant, resource, and visibility constraints during search. |
@@ -298,6 +333,28 @@ models are extensions to justify with measured need, not prerequisites.
 
 LangGraph is deliberately not required. The initial bounded agent is a direct,
 typed state machine so that its decision path remains obvious and testable.
+
+## Local setup
+
+Prerequisites: Python 3.13+, [uv](https://docs.astral.sh/uv/), and Docker.
+
+```bash
+uv sync --all-groups
+docker compose up -d
+uv run proofline status
+```
+
+Run the foundation checks with:
+
+```bash
+uv run ruff check .
+uv run pyright
+uv run pytest
+```
+
+The test suite enforces more than 85% branch coverage. Ingestion, querying,
+evaluation, and reporting commands become available as the corresponding
+capabilities are implemented.
 
 ## How to extend it
 
@@ -334,12 +391,16 @@ The value is not a chat screenshot. It is an evidence-backed engineering
 artifact:
 
 1. A baseline made retrieval limitations visible.
-2. Each retrieval and embedding choice was tested against a fixed evaluation
+2. Each retrieval and embedding choice was tested against a fixed,
    access-aware evaluation set.
 3. The system enforced authorization before an LLM could see protected evidence
    and kept explanation separate from authorization decisions.
 4. A bounded agent improved retrieval without becoming an opaque planner.
 5. Traces and quality gates made failures and trade-offs inspectable.
+
+## License
+
+Proofline is available under the [MIT License](LICENSE).
 
 That is the proof line: a traceable path from authorized source evidence and
 authoritative tools to a response that can be inspected, tested, and improved.

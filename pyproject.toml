@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Vinay Agarwal
+# Defines Proofline's reproducible Python runtime, quality gates, and CLI entry point.
+
+[project]
+name = "proofline"
+version = "0.1.0"
+description = "Access-gated retrieval and bounded agent evaluation for reliable AI assistants."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [{ name = "Vinay Agarwal" }]
+dependencies = [
+    "mcp>=2.0.1,<3",
+    "openfga-sdk>=0.10.4,<1",
+    "opentelemetry-api>=1.38,<2",
+    "pydantic>=2.11,<3",
+    "qdrant-client>=1.19,<2",
+    "typer>=0.17,<1",
+]
+
+[dependency-groups]
+dev = [
+    "ir-measures>=0.4,<1",
+    "pyright>=1.1.400,<2",
+    "pytest>=8.4,<9",
+    "pytest-asyncio>=1.2,<2",
+    "pytest-cov>=6.2,<8",
+    "ruff>=0.12,<1",
+]
+
+[project.scripts]
+proofline = "proofline.cli:app"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--cov=proofline",
+    "--cov-branch",
+    "--cov-report=term-missing",
+    "--cov-fail-under=85",
+]

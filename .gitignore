@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Vinay Agarwal
+# Excludes private working notes and reproducible local artifacts from version control.
+
+# Private working notes
+plan.md
+
+# Python and tooling
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local services, traces, and generated evaluation artifacts
+.env
+.qdrant/
+.phoenix/
+artifacts/
+reports/
+.coverage

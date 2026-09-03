@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Vinay Agarwal
+# Starts the local authorization and retrieval services used by integration work.
+
+services:
+  openfga:
+    image: openfga/openfga:v1.18.1
+    command: run --http-addr 0.0.0.0:8080 --grpc-addr 0.0.0.0:8081 --playground-enabled=false
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+
+  qdrant:
+    image: qdrant/qdrant:v1.18.2
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./.qdrant:/qdrant/storage

@@ -8,8 +8,6 @@ chunks from traces and eventual model context a testable property rather than a
 post-processing convention.
 """
 
-from __future__ import annotations
-
 import math
 import re
 from collections import Counter
@@ -30,6 +28,8 @@ class DocumentChunk:
     tenant_id: str | None
     content: str
     is_public: bool = False
+    source_revision: str = ""
+    source_url: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +93,10 @@ class AccessGatedBm25Retriever:
             )
             for chunk, document in zip(chunks, documents, strict=True)
         ]
-        ranked = sorted(scored, key=lambda item: (-item[1], item[0].id))[:limit]
+        ranked = sorted(
+            (item for item in scored if item[1] > 0),
+            key=lambda item: (-item[1], item[0].id),
+        )[:limit]
         return tuple(
             RetrievalCandidate(
                 chunk_id=chunk.id,
@@ -102,7 +105,6 @@ class AccessGatedBm25Retriever:
                 score=score,
             )
             for rank, (chunk, score) in enumerate(ranked, start=1)
-            if score > 0
         )
 
 

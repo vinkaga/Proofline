@@ -5,7 +5,7 @@
 import pytest
 
 from proofline.authorization import StaticAuthorizationAdapter
-from proofline.domain import Principal
+from proofline.domain import Principal, ScopedResource
 from proofline.retrieval import AccessGatedBm25Retriever, DocumentChunk
 
 
@@ -26,7 +26,11 @@ def retriever() -> AccessGatedBm25Retriever:
         ),
     )
     authorization = StaticAuthorizationAdapter(
-        {("user:ana", "tenant:acme"): frozenset({"document:acme-rollout"})}
+        {
+            ("user:ana", "tenant:acme"): (
+                ScopedResource(tenant_id="tenant:acme", resource_id="document:acme-rollout"),
+            )
+        }
     )
     return AccessGatedBm25Retriever(chunks, authorization)
 
@@ -69,3 +73,24 @@ async def test_public_search_cannot_return_tenant_chunks(
 
     assert result.access_scope is None
     assert [candidate.chunk_id for candidate in result.candidates] == ["chunk:public"]
+
+
+@pytest.mark.asyncio
+async def test_same_resource_id_in_two_tenants_does_not_collide() -> None:
+    authorization = StaticAuthorizationAdapter(
+        {
+            ("user:ana", "tenant:acme"): (
+                ScopedResource(tenant_id="tenant:acme", resource_id="document:rollout"),
+            ),
+            ("user:ana", "tenant:beta"): (
+                ScopedResource(tenant_id="tenant:beta", resource_id="document:rollout"),
+            ),
+        }
+    )
+
+    assert await authorization.check_access(
+        Principal(id="user:ana"), "viewer", "document:rollout", "tenant:acme"
+    )
+    assert await authorization.check_access(
+        Principal(id="user:ana"), "viewer", "document:rollout", "tenant:beta"
+    )

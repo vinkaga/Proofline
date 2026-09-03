@@ -5,6 +5,23 @@
 
 Access-gated retrieval and bounded agent evaluation for reliable AI assistants.
 
+## Implemented now
+
+- Version-pinned public corpus manifests, deterministic paragraph chunking, and
+  source revision/URL provenance.
+- Synthetic tenant/resource assignments and typed validation of the corpus and
+  25-case release suite.
+- A static test adapter plus an OpenFGA-shaped authorization adapter.
+- BM25 retrieval that applies tenant ACL filtering before scoring candidates.
+
+## Planned architecture
+
+The remaining architecture is intentional future work: a live OpenFGA
+integration, MCP tool serving, a bounded agent, dense/hybrid/reranked
+retrieval, embeddings, Phoenix tracing, and a release-gated end-to-end
+evaluation runner. The sections below describe that target system; they do not
+claim those capabilities already exist.
+
 ## The problem
 
 Most retrieval demos answer questions from a document collection. An
@@ -341,7 +358,7 @@ Prerequisites: Python 3.13+, [uv](https://docs.astral.sh/uv/), and Docker.
 ```bash
 uv sync --all-groups
 docker compose up -d
-uv run proofline status
+uv run proofline --help
 ```
 
 Run the foundation checks with:

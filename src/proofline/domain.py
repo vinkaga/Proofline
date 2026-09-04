@@ -28,13 +28,6 @@ class Principal(BaseModel):
     id: str = Field(pattern=r"^user:[a-z0-9_-]+$")
 
 
-class AccessScope(BaseModel):
-    """Resources a principal may use for one tenant-scoped retrieval request."""
-
-    tenant_id: str = Field(pattern=r"^tenant:[a-z0-9_-]+$")
-    resource_ids: tuple[str, ...] = ()
-
-
 class ScopedResource(BaseModel):
     """A resource identifier whose meaning is confined to one tenant."""
 
@@ -42,6 +35,19 @@ class ScopedResource(BaseModel):
 
     tenant_id: str = Field(pattern=r"^tenant:[a-z0-9_-]+$")
     resource_id: str = Field(min_length=1)
+
+
+class AccessScope(BaseModel):
+    """Tenant-qualified resources resolved for one tenant-scoped retrieval request."""
+
+    tenant_id: str = Field(pattern=r"^tenant:[a-z0-9_-]+$")
+    resources: tuple[ScopedResource, ...] = ()
+
+    @property
+    def resource_ids(self) -> tuple[str, ...]:
+        """Return IDs for retrieval implementations that already hold tenant scope."""
+
+        return tuple(resource.resource_id for resource in self.resources)
 
 
 class Citation(BaseModel):
@@ -77,6 +83,7 @@ class InteractionTrace(BaseModel):
     principal: Principal
     access_scope: AccessScope | None = None
     candidates: tuple[RetrievalCandidate, ...] = ()
+    context_chunk_ids: tuple[str, ...] = ()
     tool_calls: tuple[ToolCall, ...] = ()
     citations: tuple[Citation, ...] = ()
     abstained: bool = False
@@ -91,4 +98,3 @@ class EvaluationCase(BaseModel):
     query: str = Field(min_length=1)
     expected_abstention: bool = False
     required_tool: str | None = None
-    model_config = ConfigDict(frozen=True)

@@ -7,6 +7,7 @@ import pytest
 from proofline.authorization import StaticAuthorizationAdapter
 from proofline.domain import Principal, ScopedResource
 from proofline.retrieval import AccessGatedBm25Retriever, DocumentChunk
+from proofline.tracing import trace_tenant_retrieval
 
 
 @pytest.fixture
@@ -94,3 +95,39 @@ async def test_same_resource_id_in_two_tenants_does_not_collide() -> None:
     assert await authorization.check_access(
         Principal(id="user:ana"), "viewer", "document:rollout", "tenant:beta"
     )
+
+
+@pytest.mark.asyncio
+async def test_identifier_guess_cannot_add_another_tenants_resource(
+    retriever: AccessGatedBm25Retriever,
+) -> None:
+    result = await retriever.search_tenant(
+        Principal(id="user:ana"), "tenant:acme", "document beta rollout"
+    )
+
+    assert {candidate.chunk_id for candidate in result.candidates} == {"chunk:public", "chunk:acme"}
+
+
+@pytest.mark.asyncio
+async def test_static_adapter_does_not_treat_unknown_relations_as_viewer() -> None:
+    authorization = StaticAuthorizationAdapter(
+        {
+            ("user:ana", "tenant:acme"): (
+                ScopedResource(tenant_id="tenant:acme", resource_id="document:acme-rollout"),
+            )
+        }
+    )
+
+    assert not await authorization.check_access(
+        Principal(id="user:ana"), "editor", "document:acme-rollout", "tenant:acme"
+    )
+
+
+@pytest.mark.asyncio
+async def test_tenant_trace_rejects_a_public_search_result(
+    retriever: AccessGatedBm25Retriever,
+) -> None:
+    result = await retriever.search_public("rollout")
+
+    with pytest.raises(ValueError, match="access scope"):
+        trace_tenant_retrieval("public", Principal(id="user:ana"), result)

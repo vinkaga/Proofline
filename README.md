@@ -13,6 +13,8 @@ Access-gated retrieval and bounded agent evaluation for reliable AI assistants.
   25-case release suite.
 - A static test adapter plus an OpenFGA-shaped authorization adapter.
 - BM25 retrieval that applies tenant ACL filtering before scoring candidates.
+- A [lexical baseline report](reports/lexical-baseline.md) and a local
+  OpenFGA-backed `demo-tenant-search` command.
 
 ## Planned architecture
 
@@ -303,6 +305,7 @@ Each evaluated interaction should write a structured record with:
 - case and corpus version;
 - request mode and resolved access scope;
 - retrieval method, candidates, ranks, and scores;
+- the permitted chunk IDs supplied to response context;
 - router decision and tool calls with redacted inputs and outputs;
 - final answer, citations, and abstention state;
 - latency and token or cost metadata when applicable; and
@@ -367,6 +370,26 @@ Run the foundation checks with:
 uv run ruff check .
 uv run pyright
 uv run pytest
+```
+
+Run the deterministic access-gated fixture and inspect its JSON trace with:
+
+```bash
+OPENFGA_URL=http://localhost:8080 uv run proofline demo-tenant-search
+```
+
+The same fixture exposes one authoritative permission decision with:
+
+```bash
+OPENFGA_URL=http://localhost:8080 uv run proofline demo-check-access
+```
+
+To run the real OpenFGA policy integration test, start the local service and
+set its URL for pytest:
+
+```bash
+docker compose up -d openfga
+OPENFGA_URL=http://localhost:8080 uv run pytest -m integration
 ```
 
 The test suite enforces more than 85% branch coverage. Ingestion, querying,

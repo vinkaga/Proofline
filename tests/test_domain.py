@@ -13,6 +13,7 @@ from proofline.domain import (
     Principal,
     RequestMode,
     RetrievalCandidate,
+    ScopedResource,
     ToolCall,
 )
 
@@ -21,7 +22,7 @@ def test_domain_models_capture_a_permitted_interaction() -> None:
     principal = Principal(id="user:ana")
     scope = AccessScope(
         tenant_id="tenant:acme",
-        resource_ids=("document:rollout-guide",),
+        resources=(ScopedResource(tenant_id="tenant:acme", resource_id="document:rollout-guide"),),
     )
     candidate = RetrievalCandidate(
         chunk_id="chunk:rollout:1",

@@ -153,3 +153,28 @@ def test_assignments_must_reference_manifest_documents() -> None:
 
     with pytest.raises(ValueError, match="unknown documents"):
         validate_corpus_configuration(manifest, assignments)
+
+
+def test_manifest_resolves_assignments_relative_to_its_own_directory(tmp_path) -> None:
+    manifest_path = tmp_path / "corpus" / "manifest.yaml"
+    manifest_path.parent.mkdir()
+    assignments = manifest_path.parent / "access.yaml"
+    assignments.write_text("version: test\nassignments: []\n")
+    manifest_path.write_text(
+        "\n".join(
+            [
+                "version: test-v0",
+                "retrieved_at: 2026-09-03",
+                "access_assignments: access.yaml",
+                "source:",
+                "  repository: https://example.test/repo",
+                f"  revision: {'a' * 40}",
+                "  license: MIT",
+                "documents: []",
+            ]
+        )
+    )
+
+    from proofline.corpus import load_manifest
+
+    assert load_manifest(manifest_path).access_assignments == assignments

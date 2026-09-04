@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
 """Verify that the public CLI accurately communicates implemented capabilities."""
 
+import json
+
 from typer.testing import CliRunner
 
 from proofline.cli import app
@@ -66,3 +68,73 @@ def test_validate_data_accepts_the_versioned_fixtures() -> None:
 
     assert result.exit_code == 0
     assert "Validated corpus-v0" in result.stdout
+
+
+def test_ingest_writes_only_assigned_chunks_for_protected_documents(tmp_path) -> None:
+    source = tmp_path / "docs"
+    source.mkdir()
+    (source / "secret.mdx").write_text("Protected rollout detail.")
+    assignments = tmp_path / "assignments.yaml"
+    assignments.write_text(
+        "\n".join(
+            [
+                "version: test",
+                "assignments:",
+                "  - source_document: secret",
+                "    tenant_id: tenant:acme",
+                "    resource_id: document:secret",
+            ]
+        )
+    )
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        "\n".join(
+            [
+                "version: test-v0",
+                "retrieved_at: 2026-09-03",
+                f"access_assignments: {assignments}",
+                "source:",
+                "  repository: https://example.test/repo",
+                f"  revision: {'a' * 40}",
+                "  license: MIT",
+                "documents:",
+                "  - id: secret",
+                "    path: docs/secret.mdx",
+                "    url: https://example.test/secret",
+                "    visibility: protected",
+            ]
+        )
+    )
+    output = tmp_path / "corpus.jsonl"
+
+    result = runner.invoke(
+        app,
+        [
+            "ingest",
+            "--source-root",
+            str(tmp_path),
+            "--manifest",
+            str(manifest),
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert [json.loads(line)["resource_id"] for line in output.read_text().splitlines()] == [
+        "document:secret"
+    ]
+
+
+def test_demo_tenant_search_prints_only_allowed_trace_candidates() -> None:
+    result = runner.invoke(app, ["demo-tenant-search", "--authorization", "static"])
+
+    trace = json.loads(result.stdout)
+    assert result.exit_code == 0
+    assert trace["access_scope"]["resources"] == [
+        {"tenant_id": "tenant:acme", "resource_id": "document:acme-rollout"}
+    ]
+    assert {candidate["chunk_id"] for candidate in trace["candidates"]} == {
+        "chunk:public-policy",
+        "chunk:acme-rollout",
+    }

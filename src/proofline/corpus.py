@@ -68,7 +68,12 @@ class AccessAssignments(BaseModel):
 def load_manifest(path: Path) -> CorpusManifest:
     """Parse and validate the corpus manifest before any source file is read."""
 
-    return CorpusManifest.model_validate(yaml.safe_load(path.read_text()))
+    manifest = CorpusManifest.model_validate(yaml.safe_load(path.read_text()))
+    if manifest.access_assignments.is_absolute():
+        return manifest
+    return manifest.model_copy(
+        update={"access_assignments": path.parent / manifest.access_assignments}
+    )
 
 
 def load_access_assignments(path: Path) -> AccessAssignments:
@@ -114,17 +119,18 @@ def build_corpus(
         for index, paragraph in enumerate(_PARAGRAPH.split(content), start=1):
             normalized = " ".join(paragraph.split())
             if normalized:
-                chunks.append(
-                    DocumentChunk(
-                        id=f"chunk:{document.id}:{index}",
-                        resource_id=f"document:{document.id}",
-                        tenant_id=None,
-                        content=normalized,
-                        is_public=document.visibility == "public",
-                        source_revision=manifest.source.revision,
-                        source_url=str(document.url),
+                if document.visibility == "public":
+                    chunks.append(
+                        DocumentChunk(
+                            id=f"chunk:{document.id}:{index}",
+                            resource_id=f"document:{document.id}",
+                            tenant_id=None,
+                            content=normalized,
+                            is_public=True,
+                            source_revision=manifest.source.revision,
+                            source_url=str(document.url),
+                        )
                     )
-                )
                 for assignment in assignments.assignments:
                     if assignment.source_document == document.id:
                         chunks.append(

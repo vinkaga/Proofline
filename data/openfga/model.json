@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.1",
+  "type_definitions": [
+    {"type": "user", "relations": {}, "metadata": null},
+    {
+      "type": "tenant",
+      "relations": {"member": {"this": {}}},
+      "metadata": {"relations": {"member": {"directly_related_user_types": [{"type": "user"}]}}}
+    },
+    {
+      "type": "folder",
+      "relations": {
+        "tenant": {"this": {}},
+        "direct_viewer": {"this": {}},
+        "viewer": {"intersection": {"child": [
+          {"computedUserset": {"relation": "direct_viewer"}},
+          {"tupleToUserset": {"tupleset": {"relation": "tenant"}, "computedUserset": {"relation": "member"}}}
+        ]}}
+      },
+      "metadata": {"relations": {
+        "tenant": {"directly_related_user_types": [{"type": "tenant"}]},
+        "direct_viewer": {"directly_related_user_types": [{"type": "user"}]}
+      }}
+    },
+    {
+      "type": "document",
+      "relations": {
+        "tenant": {"this": {}},
+        "parent": {"this": {}},
+        "direct_viewer": {"this": {}},
+        "viewer": {"intersection": {"child": [
+          {"union": {"child": [
+            {"computedUserset": {"relation": "direct_viewer"}},
+            {"tupleToUserset": {"tupleset": {"relation": "parent"}, "computedUserset": {"relation": "viewer"}}}
+          ]}},
+          {"tupleToUserset": {"tupleset": {"relation": "tenant"}, "computedUserset": {"relation": "member"}}}
+        ]}}
+      },
+      "metadata": {"relations": {
+        "tenant": {"directly_related_user_types": [{"type": "tenant"}]},
+        "parent": {"directly_related_user_types": [{"type": "folder"}]},
+        "direct_viewer": {"directly_related_user_types": [{"type": "user"}]}
+      }}
+    }
+  ]
+}

@@ -93,6 +93,7 @@ class AccessGatedBm25Retriever:
             )
             for chunk, document in zip(chunks, documents, strict=True)
         ]
+        # Drop non-matches before limiting so a small limit never returns empty-score chunks.
         ranked = sorted(
             (item for item in scored if item[1] > 0),
             key=lambda item: (-item[1], item[0].id),

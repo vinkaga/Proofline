@@ -16,13 +16,16 @@ Access-gated retrieval and bounded agent evaluation for reliable AI assistants.
 - A reproducible lexical-baseline command that measures ACL-filtered Recall@k,
   MRR, nDCG@k, latency, and unauthorized exposure, plus a local OpenFGA-backed
   `demo-tenant-search` command.
+- Qdrant-backed dense retrieval with payload filters applied before candidates
+  are returned, and a reproducible dense-versus-lexical comparison command.
 
 ## Planned architecture
 
 The remaining architecture is intentional future work: MCP tool serving, a
-bounded agent, dense/hybrid/reranked retrieval, embeddings, Phoenix tracing,
-and a release-gated end-to-end evaluation runner. The sections below describe
-that target system; they do not claim those capabilities already exist.
+bounded agent, hybrid/reranked retrieval, semantic embedding-model comparison,
+Phoenix tracing, and a release-gated end-to-end evaluation runner. The sections
+below describe that target system; they do not claim those capabilities already
+exist.
 
 ## The problem
 
@@ -399,6 +402,22 @@ outside these ranking metrics; their release-gated evaluation arrives in Phase 7
 The offline baseline derives direct-viewer grants from the checked-in OpenFGA
 tuples; inherited relationship behavior remains covered by the OpenFGA adapter
 and integration tests.
+
+With local Qdrant running, compare its access-filtered dense-vector control to
+BM25 on the same corpus and cases:
+
+```bash
+uv run proofline evaluate-dense --source-root /path/to/openfga.dev
+```
+
+Pass `--recreate` to replace that command's named local collection on a repeat
+run. To use the optional learned FastEmbed provider, install it in an ONNX
+Runtime-compatible environment with `uv sync --extra fastembed`, then pass its
+model ID through `--embedding-model`.
+
+The built-in token-hash embedding is deterministic and zero-cost; it validates
+the Qdrant boundary and provides a reproducible control, not a claim of
+semantic-model quality. A learned embedding-model comparison is future work.
 
 To run the real OpenFGA policy integration test, start the local service and
 set its URL for pytest:

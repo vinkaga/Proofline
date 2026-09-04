@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from qdrant_client import QdrantClient
 
 from proofline.authorization import StaticAuthorizationAdapter
 from proofline.corpus import (
@@ -22,6 +23,12 @@ from proofline.corpus import (
     load_manifest,
     validate_corpus_configuration,
     write_corpus,
+)
+from proofline.dense_retrieval import (
+    FastEmbedEmbeddingProvider,
+    QdrantDenseRetriever,
+    TokenHashEmbeddingProvider,
+    write_dense_comparison_report,
 )
 from proofline.domain import Principal
 from proofline.evaluation_data import load_evaluation_suite
@@ -153,6 +160,53 @@ def evaluate_lexical(
         "Wrote lexical baseline report for "
         f"{measurement.retrieval_case_count} retrieval cases to {output}"
     )
+
+
+@app.command("evaluate-dense")
+def evaluate_dense(
+    source_root: Annotated[Path, typer.Option(exists=True, file_okay=False)],
+    manifest: Annotated[Path, typer.Option(exists=True)] = Path("data/corpus/manifest.yaml"),
+    suite: Annotated[Path, typer.Option(exists=True)] = Path("data/eval/release-v0.yaml"),
+    qdrant_url: Annotated[str, typer.Option()] = "http://localhost:6333",
+    collection: Annotated[str, typer.Option()] = "proofline-dense-evaluation",
+    recreate: Annotated[bool, typer.Option()] = False,
+    embedding_model: Annotated[str, typer.Option()] = "token-hash",
+    output: Annotated[Path, typer.Option()] = Path("artifacts/dense-baseline.md"),
+    limit: Annotated[int, typer.Option(min=1)] = 5,
+) -> None:
+    """Compare filtered Qdrant dense retrieval with the lexical baseline."""
+
+    corpus_manifest = load_manifest(manifest)
+    assignments = load_access_assignments(corpus_manifest.access_assignments)
+    chunks = build_corpus(corpus_manifest, source_root, assignments)
+    suite_data = load_evaluation_suite(suite)
+    authorization = StaticAuthorizationAdapter(load_static_permissions())
+    lexical = AccessGatedBm25Retriever(chunks, authorization)
+    provider = _embedding_provider(embedding_model)
+    dense = QdrantDenseRetriever(
+        QdrantClient(url=qdrant_url),
+        collection,
+        provider,
+        authorization,
+    )
+    index = dense.index(chunks, recreate=recreate)
+    lexical_measurement = asyncio.run(
+        evaluate_lexical_baseline(lexical, suite_data, corpus_manifest.version, limit=limit)
+    )
+    dense_measurement = asyncio.run(
+        evaluate_lexical_baseline(dense, suite_data, corpus_manifest.version, limit=limit)
+    )
+    validate_baseline_measurement(dense_measurement)
+    write_dense_comparison_report(dense_measurement, lexical_measurement, index, output)
+    typer.echo(f"Wrote dense retrieval comparison to {output}")
+
+
+def _embedding_provider(model: str) -> TokenHashEmbeddingProvider | FastEmbedEmbeddingProvider:
+    """Select the reproducible vector control or a local learned embedding model."""
+
+    if model == "token-hash":
+        return TokenHashEmbeddingProvider()
+    return FastEmbedEmbeddingProvider(model)
 
 
 async def _search_with_openfga(

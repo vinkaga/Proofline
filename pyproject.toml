@@ -20,6 +20,11 @@ dependencies = [
     "typer>=0.17,<1",
 ]
 
+[project.optional-dependencies]
+fastembed = [
+    "fastembed>=0.7,<1",
+]
+
 [dependency-groups]
 dev = [
     "ir-measures>=0.4,<1",

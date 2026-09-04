@@ -52,6 +52,7 @@ reportMissingTypeStubs = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: requires a running local OpenFGA service"]
 addopts = [
     "-ra",
     "--cov=proofline",

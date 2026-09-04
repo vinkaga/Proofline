@@ -7,6 +7,9 @@ before their implementations arrive. Explicit unavailable commands prevent a
 reviewer from mistaking scaffolding for a completed capability.
 """
 
+import asyncio
+import json
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -19,7 +22,12 @@ from proofline.corpus import (
     validate_corpus_configuration,
     write_corpus,
 )
+from proofline.domain import Principal
 from proofline.evaluation_data import load_evaluation_suite
+from proofline.openfga_fixture import provision_openfga
+from proofline.retrieval import RetrievalResult
+from proofline.tracing import trace_tenant_retrieval
+from proofline.vertical_slice import build_vertical_slice
 
 app = typer.Typer(
     name="proofline",
@@ -62,6 +70,77 @@ def validate_data(
     typer.echo(
         f"Validated {corpus.version} and {len(release_suite.cases)} {release_suite.version} cases"
     )
+
+
+@app.command("demo-tenant-search")
+def demo_tenant_search(
+    principal: Annotated[str, typer.Option()] = "user:ana",
+    tenant: Annotated[str, typer.Option()] = "tenant:acme",
+    query: Annotated[str, typer.Option()] = "release approval",
+    authorization: Annotated[str, typer.Option()] = "openfga",
+) -> None:
+    """Run the ACL-filtered fixture and print its trace as JSON."""
+
+    caller = Principal(id=principal)
+    if authorization == "static":
+        retriever = build_vertical_slice()
+        result = asyncio.run(retriever.search_tenant(caller, tenant, query))
+    elif authorization == "openfga":
+        server_url = os.environ.get("OPENFGA_URL")
+        if not server_url:
+            raise typer.BadParameter("set OPENFGA_URL or pass --authorization static")
+        result = asyncio.run(_search_with_openfga(server_url, caller, tenant, query))
+    else:
+        raise typer.BadParameter("authorization must be openfga or static")
+    trace = trace_tenant_retrieval("phase-1.5-demo", caller, result)
+    typer.echo(trace.model_dump_json(indent=2))
+
+
+@app.command("demo-check-access")
+def demo_check_access(
+    principal: Annotated[str, typer.Option()] = "user:ana",
+    tenant: Annotated[str, typer.Option()] = "tenant:acme",
+    resource: Annotated[str, typer.Option()] = "document:acme-rollout",
+    relation: Annotated[str, typer.Option()] = "viewer",
+) -> None:
+    """Run one OpenFGA permission decision against the synthetic fixture."""
+
+    server_url = os.environ.get("OPENFGA_URL")
+    if not server_url:
+        raise typer.BadParameter("set OPENFGA_URL")
+    caller = Principal(id=principal)
+    allowed = asyncio.run(
+        _check_access_with_openfga(server_url, caller, relation, resource, tenant)
+    )
+    typer.echo(json.dumps({"allowed": allowed}))
+
+
+async def _search_with_openfga(
+    server_url: str, caller: Principal, tenant: str, query: str
+) -> RetrievalResult:
+    """Run the tenant-search demo with an isolated OpenFGA fixture."""
+
+    provisioned = await provision_openfga(server_url)
+    try:
+        return await build_vertical_slice(provisioned.adapter).search_tenant(caller, tenant, query)
+    finally:
+        await provisioned.delete()
+
+
+async def _check_access_with_openfga(
+    server_url: str,
+    caller: Principal,
+    relation: str,
+    resource: str,
+    tenant: str,
+) -> bool:
+    """Run one permission check with an isolated OpenFGA fixture."""
+
+    provisioned = await provision_openfga(server_url)
+    try:
+        return await provisioned.adapter.check_access(caller, relation, resource, tenant)
+    finally:
+        await provisioned.delete()
 
 
 @app.command()

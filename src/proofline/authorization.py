@@ -49,10 +49,10 @@ class StaticAuthorizationAdapter:
     ) -> AccessScope:
         return AccessScope(
             tenant_id=tenant_id,
-            resource_ids=tuple(
+            resources=tuple(
                 sorted(
-                    resource.resource_id
-                    for resource in self._permissions.get((principal.id, tenant_id), ())
+                    self._permissions.get((principal.id, tenant_id), ()),
+                    key=lambda resource: resource.resource_id,
                 )
             ),
         )
@@ -64,7 +64,8 @@ class StaticAuthorizationAdapter:
         resource_id: str,
         tenant_id: str,
     ) -> bool:
-        del relation
+        if relation != "viewer":
+            return False
         resource = ScopedResource(tenant_id=tenant_id, resource_id=resource_id)
         return resource in self._permissions.get((principal.id, tenant_id), ())
 
@@ -90,7 +91,10 @@ class OpenFgaAuthorizationAdapter:
         )
         return AccessScope(
             tenant_id=tenant_id,
-            resource_ids=tuple(sorted(response.objects)),
+            resources=tuple(
+                ScopedResource(tenant_id=tenant_id, resource_id=resource_id)
+                for resource_id in sorted(response.objects)
+            ),
         )
 
     async def check_access(
@@ -100,6 +104,7 @@ class OpenFgaAuthorizationAdapter:
         resource_id: str,
         tenant_id: str,
     ) -> bool:
+        # Tenant membership is enforced by the OpenFGA model; document IDs are global.
         del tenant_id
         response = await self._client.check(
             ClientCheckRequest(

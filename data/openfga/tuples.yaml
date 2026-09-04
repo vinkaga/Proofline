@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Vinay Agarwal
+# Synthetic relationships for the Phase 1.5 fixture. Document IDs are global.
+
+version: openfga-v0
+tuples:
+  - user: user:ana
+    relation: member
+    object: tenant:acme
+  - user: user:ben
+    relation: member
+    object: tenant:beta
+  - user: user:carla
+    relation: member
+    object: tenant:acme
+  - user: tenant:acme
+    relation: tenant
+    object: document:acme-rollout
+  - user: tenant:acme
+    relation: tenant
+    object: folder:acme-incidents
+  - user: tenant:acme
+    relation: tenant
+    object: document:acme-secret
+  - user: folder:acme-incidents
+    relation: parent
+    object: document:acme-secret
+  - user: tenant:beta
+    relation: tenant
+    object: document:beta-rollout
+  - user: tenant:beta
+    relation: tenant
+    object: document:beta-secret
+  - user: user:ana
+    relation: direct_viewer
+    object: document:acme-rollout
+  - user: user:ben
+    relation: direct_viewer
+    object: document:beta-rollout
+  - user: user:carla
+    relation: direct_viewer
+    object: folder:acme-incidents

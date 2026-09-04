@@ -3,13 +3,16 @@
 """Qdrant-backed dense retrieval with filters applied before candidate return."""
 
 import hashlib
+import json
 import math
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -26,6 +29,7 @@ from qdrant_client.models import (
 from proofline.authorization import AuthorizationAdapter
 from proofline.domain import Principal, RetrievalCandidate
 from proofline.retrieval import DocumentChunk, RetrievalResult
+from proofline.settings import load_settings
 
 if TYPE_CHECKING:
     from proofline.lexical_evaluation import CaseMeasurement, LexicalBaselineMeasurement
@@ -41,6 +45,12 @@ class EmbeddingProvider(Protocol):
 
     @property
     def dimensions(self) -> int: ...
+
+    @property
+    def estimated_embedding_cost_usd(self) -> float: ...
+
+    @property
+    def estimated_query_cost_usd(self) -> float: ...
 
     def embed_documents(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]: ...
 
@@ -67,6 +77,14 @@ class TokenHashEmbeddingProvider:
     @property
     def dimensions(self) -> int:
         return self._dimensions
+
+    @property
+    def estimated_embedding_cost_usd(self) -> float:
+        return 0.0
+
+    @property
+    def estimated_query_cost_usd(self) -> float:
+        return 0.0
 
     def embed_documents(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
         return tuple(self.embed_query(text) for text in texts)
@@ -112,6 +130,14 @@ class FastEmbedEmbeddingProvider:
             raise RuntimeError("embed documents before reading learned-model dimensions")
         return self._dimensions
 
+    @property
+    def estimated_embedding_cost_usd(self) -> float:
+        return 0.0
+
+    @property
+    def estimated_query_cost_usd(self) -> float:
+        return 0.0
+
     def embed_documents(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
         return self._embed(texts)
 
@@ -131,6 +157,132 @@ class FastEmbedEmbeddingProvider:
         return vectors
 
 
+class OpenAiEmbeddingProvider:
+    """OpenAI embeddings provider that reads its API key from the environment."""
+
+    def __init__(self, model_id: str = "text-embedding-3-small") -> None:
+        api_key = load_settings().openai_api_key
+        if api_key is None:
+            raise RuntimeError("set OPENAI_API_KEY before selecting an OpenAI embedding model")
+        self._api_key = api_key.get_secret_value()
+        self._model_id = model_id
+        self._input_token_price = _openai_embedding_price(model_id)
+        self._dimensions: int | None = None
+        self._document_tokens = 0
+        self._query_tokens = 0
+
+    @property
+    def model_id(self) -> str:
+        return self._model_id
+
+    @property
+    def dimensions(self) -> int:
+        if self._dimensions is None:
+            raise RuntimeError("embed documents before reading OpenAI embedding dimensions")
+        return self._dimensions
+
+    @property
+    def estimated_embedding_cost_usd(self) -> float:
+        return self._document_tokens * self._input_token_price / 1_000_000
+
+    @property
+    def estimated_query_cost_usd(self) -> float:
+        return self._query_tokens * self._input_token_price / 1_000_000
+
+    def embed_documents(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+        return tuple(
+            vector
+            for batch in _batches(texts, size=128)
+            for vector in self._embed(batch, document_request=True)
+        )
+
+    def embed_query(self, text: str) -> tuple[float, ...]:
+        return self._embed((text,), document_request=False)[0]
+
+    def _embed(
+        self, texts: Sequence[str], *, document_request: bool
+    ) -> tuple[tuple[float, ...], ...]:
+        request = Request(
+            "https://api.openai.com/v1/embeddings",
+            data=json.dumps({"model": self._model_id, "input": list(texts)}).encode(),
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed OpenAI endpoint
+                payload = json.loads(response.read())
+        except HTTPError as error:
+            detail = _openai_error_detail(error)
+            raise RuntimeError(
+                f"OpenAI embeddings request failed with HTTP {error.code}{detail}"
+            ) from error
+        except URLError as error:
+            raise RuntimeError("OpenAI embeddings request could not reach the API") from error
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list):
+            raise RuntimeError("OpenAI embeddings response did not contain data")
+        entries: list[tuple[int, list[float]]] = []
+        for item in data:
+            embedding = item.get("embedding") if isinstance(item, dict) else None
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("index"), int)
+                or not isinstance(embedding, list)
+                or any(not isinstance(value, (int, float)) for value in embedding)
+            ):
+                raise RuntimeError("OpenAI embeddings response contained an invalid vector")
+            entries.append((item["index"], [float(value) for value in embedding]))
+        vectors = tuple(
+            tuple(embedding) for _, embedding in sorted(entries)
+        )
+        dimensions = _validate_vectors(vectors, len(texts))
+        if self._dimensions is not None and self._dimensions != dimensions:
+            raise RuntimeError("OpenAI embedding dimensions changed between calls")
+        self._dimensions = dimensions
+        usage = payload.get("usage") if isinstance(payload, dict) else None
+        if isinstance(usage, dict) and isinstance(usage.get("total_tokens"), int):
+            if document_request:
+                self._document_tokens += usage["total_tokens"]
+            else:
+                self._query_tokens += usage["total_tokens"]
+        return vectors
+
+
+def _openai_embedding_price(model_id: str) -> float:
+    """Return the published per-million-input-token price for supported OpenAI models."""
+
+    prices = {
+        "text-embedding-3-small": 0.02,
+        "text-embedding-3-large": 0.13,
+    }
+    try:
+        return prices[model_id]
+    except KeyError as error:
+        raise ValueError(
+            f"unsupported OpenAI embedding model for cost accounting: {model_id}"
+        ) from error
+
+
+def _batches(texts: Sequence[str], *, size: int) -> Iterator[Sequence[str]]:
+    for start in range(0, len(texts), size):
+        yield texts[start : start + size]
+
+
+def _openai_error_detail(error: HTTPError) -> str:
+    """Return a concise, non-sensitive explanation from an OpenAI error body."""
+
+    try:
+        payload = json.loads(error.read(512).decode())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return ""
+    error_payload = payload.get("error") if isinstance(payload, dict) else None
+    message = error_payload.get("message") if isinstance(error_payload, dict) else None
+    return f": {message}" if isinstance(message, str) else ""
+
+
 @dataclass(frozen=True, slots=True)
 class DenseIndexMetadata:
     """Reproducibility metadata recorded alongside a dense evaluation report."""
@@ -147,6 +299,8 @@ class DenseIndexMetadata:
 
 class QdrantDenseRetriever:
     """Retrieve only Qdrant points admitted by an access-derived payload filter."""
+
+    _UPSERT_BATCH_SIZE = 128
 
     def __init__(
         self,
@@ -187,13 +341,21 @@ class QdrantDenseRetriever:
                 self._client.create_payload_index(
                     self._collection_name, field, field_schema=PayloadSchemaType.KEYWORD
                 )
-            self._client.upsert(
-                self._collection_name,
-                points=[
-                    PointStruct(id=index, vector=list(vector), payload=_payload(chunk))
-                    for index, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True))
-                ],
-            )
+            for start in range(0, len(chunks), self._UPSERT_BATCH_SIZE):
+                self._client.upsert(
+                    self._collection_name,
+                    points=[
+                        PointStruct(id=index, vector=list(vector), payload=_payload(chunk))
+                        for index, (chunk, vector) in enumerate(
+                            zip(
+                                chunks[start : start + self._UPSERT_BATCH_SIZE],
+                                vectors[start : start + self._UPSERT_BATCH_SIZE],
+                                strict=True,
+                            ),
+                            start=start,
+                        )
+                    ],
+                )
         except Exception:
             if created:
                 self._client.delete_collection(self._collection_name)
@@ -205,6 +367,8 @@ class QdrantDenseRetriever:
             embedding_model=self._embedding_provider.model_id,
             corpus_revision=next(iter(revisions)),
             estimated_vector_index_bytes=len(chunks) * dimensions * 4,
+            estimated_embedding_cost_usd=self._embedding_provider.estimated_embedding_cost_usd,
+            estimated_query_cost_usd=self._embedding_provider.estimated_query_cost_usd,
         )
 
     async def search_public(self, query: str, limit: int = 5) -> RetrievalResult:
@@ -323,8 +487,8 @@ def write_dense_comparison_report(
             "(float32 vectors)"
         ),
         (
-            f"Estimated embedding cost: ${index.estimated_embedding_cost_usd:.4f} · "
-            f"query cost: ${index.estimated_query_cost_usd:.4f}"
+            f"Estimated embedding cost: ${index.estimated_embedding_cost_usd:.6f} · "
+            f"query cost: ${index.estimated_query_cost_usd:.6f}"
         ),
         "",
         "| Method | Recall@k | MRR | nDCG@k | Exposure | p50 latency | p95 latency |",

@@ -10,6 +10,7 @@ reviewer from mistaking scaffolding for a completed capability.
 import asyncio
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 
@@ -26,12 +27,14 @@ from proofline.corpus import (
 )
 from proofline.dense_retrieval import (
     FastEmbedEmbeddingProvider,
+    OpenAiEmbeddingProvider,
     QdrantDenseRetriever,
     TokenHashEmbeddingProvider,
     write_dense_comparison_report,
 )
 from proofline.domain import Principal
 from proofline.evaluation_data import load_evaluation_suite
+from proofline.hybrid_retrieval import HybridRrfRetriever
 from proofline.lexical_evaluation import (
     evaluate_lexical_baseline,
     validate_baseline_measurement,
@@ -39,7 +42,9 @@ from proofline.lexical_evaluation import (
     write_lexical_traces,
 )
 from proofline.openfga_fixture import load_static_permissions, provision_openfga
+from proofline.reranking import RerankingRetriever, TokenCoverageReranker
 from proofline.retrieval import AccessGatedBm25Retriever, RetrievalResult
+from proofline.retrieval_comparison import write_method_comparison_report
 from proofline.tracing import trace_tenant_retrieval
 from proofline.vertical_slice import build_vertical_slice
 
@@ -197,16 +202,69 @@ def evaluate_dense(
         evaluate_lexical_baseline(dense, suite_data, corpus_manifest.version, limit=limit)
     )
     validate_baseline_measurement(dense_measurement)
+    index = replace(index, estimated_query_cost_usd=provider.estimated_query_cost_usd)
     write_dense_comparison_report(dense_measurement, lexical_measurement, index, output)
     typer.echo(f"Wrote dense retrieval comparison to {output}")
 
 
-def _embedding_provider(model: str) -> TokenHashEmbeddingProvider | FastEmbedEmbeddingProvider:
+def _embedding_provider(
+    model: str,
+) -> TokenHashEmbeddingProvider | FastEmbedEmbeddingProvider | OpenAiEmbeddingProvider:
     """Select the reproducible vector control or a local learned embedding model."""
 
     if model == "token-hash":
         return TokenHashEmbeddingProvider()
+    if model.startswith("openai:"):
+        return OpenAiEmbeddingProvider(model.removeprefix("openai:"))
     return FastEmbedEmbeddingProvider(model)
+
+
+@app.command("evaluate-hybrid")
+def evaluate_hybrid(
+    source_root: Annotated[Path, typer.Option(exists=True, file_okay=False)],
+    manifest_path: Annotated[Path, typer.Option(exists=True)] = Path("data/corpus/manifest.yaml"),
+    suite_path: Annotated[Path, typer.Option(exists=True)] = Path("data/eval/release-v0.yaml"),
+    qdrant_url: Annotated[str, typer.Option()] = "http://localhost:6333",
+    collection: Annotated[str, typer.Option()] = "proofline-hybrid-evaluation",
+    recreate: Annotated[bool, typer.Option()] = False,
+    embedding_model: Annotated[str, typer.Option()] = "token-hash",
+    output: Annotated[Path, typer.Option()] = Path("artifacts/retrieval-comparison.md"),
+    limit: Annotated[int, typer.Option(min=1)] = 5,
+) -> None:
+    """Compare lexical, dense, RRF hybrid, and fixed-candidate reranking."""
+
+    manifest = load_manifest(manifest_path)
+    assignments = load_access_assignments(manifest.access_assignments)
+    chunks = build_corpus(manifest, source_root, assignments)
+    suite = load_evaluation_suite(suite_path)
+    authorization = StaticAuthorizationAdapter(load_static_permissions())
+    lexical = AccessGatedBm25Retriever(chunks, authorization)
+    provider = _embedding_provider(embedding_model)
+    dense = QdrantDenseRetriever(
+        QdrantClient(url=qdrant_url),
+        collection,
+        provider,
+        authorization,
+    )
+    index = dense.index(chunks, recreate=recreate)
+    hybrid = HybridRrfRetriever(lexical, dense)
+    reranked = RerankingRetriever(hybrid, TokenCoverageReranker(chunks))
+    measurements = {
+        name: asyncio.run(
+            evaluate_lexical_baseline(retriever, suite, manifest.version, limit=limit)
+        )
+        for name, retriever in {
+            "lexical": lexical,
+            "dense": dense,
+            "hybrid-rrf": hybrid,
+            "hybrid-rrf-token-coverage": reranked,
+        }.items()
+    }
+    for measurement in measurements.values():
+        validate_baseline_measurement(measurement)
+    index = replace(index, estimated_query_cost_usd=provider.estimated_query_cost_usd)
+    write_method_comparison_report(measurements, index, output)
+    typer.echo(f"Wrote retrieval comparison to {output}")
 
 
 async def _search_with_openfga(

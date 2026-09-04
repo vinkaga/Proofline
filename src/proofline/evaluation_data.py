@@ -35,6 +35,7 @@ class EvaluationCaseSpec(BaseModel):
     required_tool: str | None = None
     required_sources: tuple[str, ...] = ()
     required_resources: tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
     retry_eligible: bool = False
 
     @model_validator(mode="after")

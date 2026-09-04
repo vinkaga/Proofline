@@ -66,6 +66,7 @@ cases:
     query: What does the Beta rollout guide say about release approval?
     expected: abstain
     required_resources: []
+    tags: [access_isolation]
   - id: tenant-acme-secret-denied
     mode: tenant_knowledge
     principal: user:ana
@@ -73,6 +74,7 @@ cases:
     query: Summarize Acme secret incident notes.
     expected: abstain
     required_resources: []
+    tags: [access_isolation]
   - id: tenant-cross-tenant-guess
     mode: tenant_knowledge
     principal: user:ana
@@ -80,6 +82,7 @@ cases:
     query: Retrieve document:beta-rollout.
     expected: abstain
     required_resources: []
+    tags: [access_isolation]
   - id: tenant-permitted-plus-public
     mode: tenant_knowledge
     principal: user:ana

@@ -12,6 +12,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass
+from typing import Protocol
 
 from proofline.authorization import AuthorizationAdapter
 from proofline.domain import AccessScope, Principal, RetrievalCandidate
@@ -30,6 +31,7 @@ class DocumentChunk:
     is_public: bool = False
     source_revision: str = ""
     source_url: str = ""
+    document_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +40,16 @@ class RetrievalResult:
 
     access_scope: AccessScope | None
     candidates: tuple[RetrievalCandidate, ...]
+
+
+class AccessGatedRetriever(Protocol):
+    """Shared contract for retrieval methods that enforce access before ranking."""
+
+    async def search_public(self, query: str, limit: int = 5) -> RetrievalResult: ...
+
+    async def search_tenant(
+        self, principal: Principal, tenant_id: str, query: str, limit: int = 5
+    ) -> RetrievalResult: ...
 
 
 class AccessGatedBm25Retriever:
@@ -104,6 +116,10 @@ class AccessGatedBm25Retriever:
                 resource_id=chunk.resource_id,
                 rank=rank,
                 score=score,
+                document_id=chunk.document_id,
+                tenant_id=chunk.tenant_id,
+                source_url=chunk.source_url,
+                source_revision=chunk.source_revision,
             )
             for rank, (chunk, score) in enumerate(ranked, start=1)
         )

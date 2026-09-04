@@ -74,6 +74,69 @@ def test_validate_data_accepts_the_versioned_fixtures() -> None:
     assert "Validated corpus-v0" in result.stdout
 
 
+def test_evaluate_lexical_writes_report_and_retrieval_traces(tmp_path) -> None:
+    source = tmp_path / "docs"
+    source.mkdir()
+    (source / "check.mdx").write_text("Check decides whether a user may view a document.")
+    assignments = tmp_path / "assignments.yaml"
+    assignments.write_text("version: test\nassignments: []\n")
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        "\n".join(
+            [
+                "version: test-v0",
+                "retrieved_at: 2026-09-03",
+                f"access_assignments: {assignments}",
+                "source:",
+                "  repository: https://example.test/repo",
+                f"  revision: {'a' * 40}",
+                "  license: MIT",
+                "documents:",
+                "  - id: check",
+                "    path: docs/check.mdx",
+                "    url: https://example.test/check",
+                "    visibility: public",
+            ]
+        )
+    )
+    suite = tmp_path / "suite.yaml"
+    suite.write_text(
+        """version: test-suite
+cases:
+  - id: check
+    mode: public_documentation
+    principal: user:ana
+    query: What does Check decide?
+    expected: cited_answer
+    required_sources: [check]
+"""
+    )
+    report = tmp_path / "report.md"
+    traces = tmp_path / "traces.jsonl"
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "evaluate-lexical",
+            "--source-root",
+            str(tmp_path),
+            "--manifest",
+            str(manifest),
+            "--suite",
+            str(suite),
+            "--output",
+            str(report),
+            "--traces-output",
+            str(traces),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "1 retrieval cases" in result.stdout
+    assert "Recall@k" in report.read_text()
+    assert len(traces.read_text().splitlines()) == 1
+
+
 def test_ingest_writes_only_assigned_chunks_for_protected_documents(tmp_path) -> None:
     source = tmp_path / "docs"
     source.mkdir()

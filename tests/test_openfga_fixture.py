@@ -10,6 +10,7 @@ import pytest
 
 import proofline.openfga_fixture as fixture
 from proofline.authorization import OpenFgaAuthorizationAdapter
+from proofline.domain import ScopedResource
 
 
 class FakeClient:
@@ -71,3 +72,24 @@ def test_provisioned_store_is_deleted_and_invalid_responses_fail(monkeypatch) ->
     assert calls == [("DELETE", "/stores/store")]
     with pytest.raises(ValueError, match="string 'id'"):
         fixture._required_string({}, "id")
+
+
+def test_static_permissions_are_derived_from_versioned_tuples(tmp_path) -> None:
+    (tmp_path / "tuples.yaml").write_text(
+        """tuples:
+  - user: tenant:acme
+    relation: tenant
+    object: document:rollout
+  - user: user:ana
+    relation: direct_viewer
+    object: document:rollout
+"""
+    )
+
+    permissions = fixture.load_static_permissions(tmp_path)
+
+    assert permissions == {
+        ("user:ana", "tenant:acme"): (
+            ScopedResource(tenant_id="tenant:acme", resource_id="document:rollout"),
+        )
+    }

@@ -129,6 +129,7 @@ def build_corpus(
                             is_public=True,
                             source_revision=manifest.source.revision,
                             source_url=str(document.url),
+                            document_id=document.id,
                         )
                     )
                 for assignment in assignments.assignments:
@@ -141,6 +142,7 @@ def build_corpus(
                                 content=normalized,
                                 source_revision=manifest.source.revision,
                                 source_url=str(document.url),
+                                document_id=document.id,
                             )
                         )
     return tuple(chunks)

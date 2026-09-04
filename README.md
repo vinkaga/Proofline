@@ -18,11 +18,13 @@ Access-gated retrieval and bounded agent evaluation for reliable AI assistants.
   `demo-tenant-search` command.
 - Qdrant-backed dense retrieval with payload filters applied before candidates
   are returned, and a reproducible dense-versus-lexical comparison command.
+- Access-filtered reciprocal-rank fusion and fixed-candidate reranking, with a
+  comparison command that retains lexical retrieval when added complexity loses.
 
 ## Planned architecture
 
 The remaining architecture is intentional future work: MCP tool serving, a
-bounded agent, hybrid/reranked retrieval, semantic embedding-model comparison,
+bounded agent, semantic embedding-model comparison,
 Phoenix tracing, and a release-gated end-to-end evaluation runner. The sections
 below describe that target system; they do not claim those capabilities already
 exist.
@@ -415,6 +417,12 @@ run. To use the optional learned FastEmbed provider, install it in an ONNX
 Runtime-compatible environment with `uv sync --extra fastembed`, then pass its
 model ID through `--embedding-model`.
 
+For OpenAI embeddings, set `OPENAI_API_KEY` in the project's ignored local
+`.env`; the typed Pydantic settings boundary loads it automatically, while a
+shell environment variable takes precedence. Then select
+`--embedding-model openai:text-embedding-3-small`. This calls the embeddings
+endpoint only; it does not use a chat or reasoning model.
+
 The built-in token-hash embedding is deterministic and zero-cost; it validates
 the Qdrant boundary and provides a reproducible control, not a claim of
 semantic-model quality. A learned embedding-model comparison is future work.
@@ -424,8 +432,11 @@ set its URL for pytest:
 
 ```bash
 docker compose up -d openfga
-OPENFGA_URL=http://localhost:8080 uv run pytest -m integration
+OPENFGA_URL=http://localhost:8080 uv run pytest -m integration --no-cov
 ```
+
+The focused integration command disables the repository-wide coverage gate;
+run `uv run pytest` without test selection to enforce the 85% coverage threshold.
 
 The test suite enforces more than 85% branch coverage. Ingestion, querying,
 evaluation, and reporting commands become available as the corresponding

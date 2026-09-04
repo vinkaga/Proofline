@@ -14,6 +14,7 @@ from typing import Protocol
 from openfga_sdk import OpenFgaClient
 from openfga_sdk.client.models.check_request import ClientCheckRequest
 from openfga_sdk.client.models.list_objects_request import ClientListObjectsRequest
+from openfga_sdk.models.read_request_tuple_key import ReadRequestTupleKey
 
 from proofline.domain import AccessScope, Principal, ScopedResource
 
@@ -82,20 +83,56 @@ class OpenFgaAuthorizationAdapter:
         principal: Principal,
         tenant_id: str,
     ) -> AccessScope:
-        response = await self._client.list_objects(
+        allowed = await self._client.list_objects(
             ClientListObjectsRequest(
                 user=principal.id,
                 relation="viewer",
                 type=self._resource_type,
             )
         )
+        tenant_resources = await self._list_tenant_resources(tenant_id)
         return AccessScope(
             tenant_id=tenant_id,
             resources=tuple(
                 ScopedResource(tenant_id=tenant_id, resource_id=resource_id)
-                for resource_id in sorted(response.objects)
+                for resource_id in sorted(set(allowed.objects) & tenant_resources)
             ),
         )
+
+    async def _list_tenant_resources(self, tenant_id: str) -> set[str]:
+        """Read every document explicitly assigned to one tenant.
+
+        ``ListObjects`` answers for a principal across all tenants. Intersecting
+        that result with the policy tuples for this tenant keeps the returned
+        ``AccessScope`` tenant-qualified before retrieval sees it.
+        """
+
+        resources: set[str] = set()
+        continuation_token: str | None = None
+        while True:
+            # The SDK consumes pagination keys from this mapping, so each request
+            # needs its own options object.
+            options: dict[str, int | str | dict[str, int | str]] = {"page_size": 100}
+            if continuation_token:
+                options["continuation_token"] = continuation_token
+            response = await self._client.read(
+                ReadRequestTupleKey(
+                    user=tenant_id,
+                    relation="tenant",
+                    object=f"{self._resource_type}:",
+                ),
+                options,
+            )
+            resources.update(
+                item.key.object
+                for item in response.tuples or ()
+                if item.key is not None
+                and item.key.object is not None
+                and item.key.object.startswith(f"{self._resource_type}:")
+            )
+            if not response.continuation_token:
+                return resources
+            continuation_token = response.continuation_token
 
     async def check_access(
         self,
@@ -104,8 +141,8 @@ class OpenFgaAuthorizationAdapter:
         resource_id: str,
         tenant_id: str,
     ) -> bool:
-        # Tenant membership is enforced by the OpenFGA model; document IDs are global.
-        del tenant_id
+        if not await self._tenant_contains_resource(tenant_id, resource_id):
+            return False
         response = await self._client.check(
             ClientCheckRequest(
                 user=principal.id,
@@ -114,3 +151,21 @@ class OpenFgaAuthorizationAdapter:
             )
         )
         return response.allowed
+
+    async def _tenant_contains_resource(self, tenant_id: str, resource_id: str) -> bool:
+        """Confirm that an explicit permission request names the right tenant."""
+
+        response = await self._client.read(
+            ReadRequestTupleKey(
+                user=tenant_id,
+                relation="tenant",
+                object=resource_id,
+            )
+        )
+        return any(
+            item.key is not None
+            and item.key.object == resource_id
+            and item.key.relation == "tenant"
+            and item.key.user == tenant_id
+            for item in response.tuples or ()
+        )

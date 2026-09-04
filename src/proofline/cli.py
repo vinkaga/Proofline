@@ -15,6 +15,7 @@ from typing import Annotated
 
 import typer
 
+from proofline.authorization import StaticAuthorizationAdapter
 from proofline.corpus import (
     build_corpus,
     load_access_assignments,
@@ -24,8 +25,14 @@ from proofline.corpus import (
 )
 from proofline.domain import Principal
 from proofline.evaluation_data import load_evaluation_suite
-from proofline.openfga_fixture import provision_openfga
-from proofline.retrieval import RetrievalResult
+from proofline.lexical_evaluation import (
+    evaluate_lexical_baseline,
+    validate_baseline_measurement,
+    write_lexical_report,
+    write_lexical_traces,
+)
+from proofline.openfga_fixture import load_static_permissions, provision_openfga
+from proofline.retrieval import AccessGatedBm25Retriever, RetrievalResult
 from proofline.tracing import trace_tenant_retrieval
 from proofline.vertical_slice import build_vertical_slice
 
@@ -113,6 +120,39 @@ def demo_check_access(
         _check_access_with_openfga(server_url, caller, relation, resource, tenant)
     )
     typer.echo(json.dumps({"allowed": allowed}))
+
+
+@app.command("evaluate-lexical")
+def evaluate_lexical(
+    source_root: Annotated[Path, typer.Option(exists=True, file_okay=False)],
+    manifest: Annotated[Path, typer.Option(exists=True)] = Path("data/corpus/manifest.yaml"),
+    suite: Annotated[Path, typer.Option(exists=True)] = Path("data/eval/release-v0.yaml"),
+    output: Annotated[Path, typer.Option()] = Path("artifacts/lexical-baseline.md"),
+    traces_output: Annotated[Path, typer.Option()] = Path(
+        "artifacts/lexical-baseline-traces.jsonl"
+    ),
+    limit: Annotated[int, typer.Option(min=1)] = 5,
+) -> None:
+    """Evaluate ACL-filtered BM25 and write a reproducible Phase 3 report."""
+
+    corpus_manifest = load_manifest(manifest)
+    assignments = load_access_assignments(corpus_manifest.access_assignments)
+    chunks = build_corpus(corpus_manifest, source_root, assignments)
+    measurement = asyncio.run(
+        evaluate_lexical_baseline(
+            AccessGatedBm25Retriever(chunks, StaticAuthorizationAdapter(load_static_permissions())),
+            load_evaluation_suite(suite),
+            corpus_manifest.version,
+            limit=limit,
+        )
+    )
+    validate_baseline_measurement(measurement)
+    write_lexical_report(measurement, output)
+    write_lexical_traces(measurement, traces_output)
+    typer.echo(
+        "Wrote lexical baseline report for "
+        f"{measurement.retrieval_case_count} retrieval cases to {output}"
+    )
 
 
 async def _search_with_openfga(

@@ -11,6 +11,7 @@ import yaml
 from openfga_sdk import ClientConfiguration, OpenFgaClient
 
 from proofline.authorization import OpenFgaAuthorizationAdapter
+from proofline.domain import ScopedResource
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +66,35 @@ async def provision_openfga(
         )
     )
     return ProvisionedOpenFga(OpenFgaAuthorizationAdapter(client), client, server_url, store_id)
+
+
+def load_static_permissions(
+    data_root: Path = Path("data/openfga"),
+) -> dict[tuple[str, str], tuple[ScopedResource, ...]]:
+    """Derive deterministic direct-viewer scopes from the canonical policy tuples.
+
+    This is intentionally limited to the static test adapter's direct-viewer
+    contract.  The full relationship model remains exercised through OpenFGA.
+    """
+
+    tuples = yaml.safe_load((data_root / "tuples.yaml").read_text())["tuples"]
+    document_tenants = {
+        entry["object"]: entry["user"]
+        for entry in tuples
+        if entry["relation"] == "tenant" and entry["object"].startswith("document:")
+    }
+    permissions: dict[tuple[str, str], list[ScopedResource]] = {}
+    for entry in tuples:
+        if entry["relation"] != "direct_viewer" or entry["object"] not in document_tenants:
+            continue
+        tenant_id = document_tenants[entry["object"]]
+        permissions.setdefault((entry["user"], tenant_id), []).append(
+            ScopedResource(tenant_id=tenant_id, resource_id=entry["object"])
+        )
+    return {
+        key: tuple(sorted(resources, key=lambda resource: resource.resource_id))
+        for key, resources in permissions.items()
+    }
 
 
 def _request(

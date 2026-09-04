@@ -67,12 +67,16 @@ class ToolCall(BaseModel):
 
 
 class RetrievalCandidate(BaseModel):
-    """One permitted candidate returned by a retrieval implementation."""
+    """One permitted, citation-ready candidate returned by retrieval."""
 
     chunk_id: str
     resource_id: str
     rank: int = Field(ge=1)
     score: float
+    document_id: str = ""
+    tenant_id: str | None = None
+    source_url: str = ""
+    source_revision: str = ""
 
 
 class InteractionTrace(BaseModel):

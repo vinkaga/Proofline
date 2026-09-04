@@ -13,16 +13,16 @@ Access-gated retrieval and bounded agent evaluation for reliable AI assistants.
   25-case release suite.
 - A static test adapter plus an OpenFGA-shaped authorization adapter.
 - BM25 retrieval that applies tenant ACL filtering before scoring candidates.
-- A [lexical baseline report](reports/lexical-baseline.md) and a local
-  OpenFGA-backed `demo-tenant-search` command.
+- A reproducible lexical-baseline command that measures ACL-filtered Recall@k,
+  MRR, nDCG@k, latency, and unauthorized exposure, plus a local OpenFGA-backed
+  `demo-tenant-search` command.
 
 ## Planned architecture
 
-The remaining architecture is intentional future work: a live OpenFGA
-integration, MCP tool serving, a bounded agent, dense/hybrid/reranked
-retrieval, embeddings, Phoenix tracing, and a release-gated end-to-end
-evaluation runner. The sections below describe that target system; they do not
-claim those capabilities already exist.
+The remaining architecture is intentional future work: MCP tool serving, a
+bounded agent, dense/hybrid/reranked retrieval, embeddings, Phoenix tracing,
+and a release-gated end-to-end evaluation runner. The sections below describe
+that target system; they do not claim those capabilities already exist.
 
 ## The problem
 
@@ -383,6 +383,22 @@ The same fixture exposes one authoritative permission decision with:
 ```bash
 OPENFGA_URL=http://localhost:8080 uv run proofline demo-check-access
 ```
+
+Build and evaluate the pinned documentation corpus with a checkout at the
+revision named in `data/corpus/manifest.yaml`:
+
+```bash
+uv run proofline evaluate-lexical --source-root /path/to/openfga.dev
+```
+
+This writes `artifacts/lexical-baseline.md` and one inspectable trace per
+retrieval-path case to `artifacts/lexical-baseline-traces.jsonl`. It scores the
+reviewed evidence-retrieval cases at a fixed `k` and records latency plus
+independent access-scope and citation-provenance checks. Permission cases remain
+outside these ranking metrics; their release-gated evaluation arrives in Phase 7.
+The offline baseline derives direct-viewer grants from the checked-in OpenFGA
+tuples; inherited relationship behavior remains covered by the OpenFGA adapter
+and integration tests.
 
 To run the real OpenFGA policy integration test, start the local service and
 set its URL for pytest:

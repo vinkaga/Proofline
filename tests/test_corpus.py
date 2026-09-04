@@ -155,6 +155,38 @@ def test_assignments_must_reference_manifest_documents() -> None:
         validate_corpus_configuration(manifest, assignments)
 
 
+def test_manifest_document_ids_must_be_unique() -> None:
+    manifest = CorpusManifest.model_validate(
+        {
+            "version": "test-v0",
+            "retrieved_at": "2026-09-03",
+            "access_assignments": "data/access/resource-assignments.yaml",
+            "source": {
+                "repository": "https://example.test/repo",
+                "revision": "a" * 40,
+                "license": "MIT",
+            },
+            "documents": [
+                {
+                    "id": "duplicate",
+                    "path": "first.mdx",
+                    "url": "https://example.test/first",
+                    "visibility": "public",
+                },
+                {
+                    "id": "duplicate",
+                    "path": "second.mdx",
+                    "url": "https://example.test/second",
+                    "visibility": "public",
+                },
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="document IDs must be unique"):
+        validate_corpus_configuration(manifest, AccessAssignments(version="test", assignments=()))
+
+
 def test_manifest_resolves_assignments_relative_to_its_own_directory(tmp_path) -> None:
     manifest_path = tmp_path / "corpus" / "manifest.yaml"
     manifest_path.parent.mkdir()

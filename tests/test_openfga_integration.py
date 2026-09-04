@@ -31,6 +31,10 @@ async def test_checked_in_model_enforces_tenant_membership_and_scope() -> None:
         )
 
         assert scope.resource_ids == ("document:acme-rollout",)
+        beta_scope = await provisioned.adapter.list_permitted_resources(
+            Principal(id="user:ana"), "tenant:beta"
+        )
+        assert beta_scope.resource_ids == ()
         assert await provisioned.adapter.check_access(
             Principal(id="user:ana"), "viewer", "document:acme-rollout", "tenant:acme"
         )
@@ -40,8 +44,14 @@ async def test_checked_in_model_enforces_tenant_membership_and_scope() -> None:
         assert not await provisioned.adapter.check_access(
             Principal(id="user:ana"), "viewer", "document:acme-secret", "tenant:acme"
         )
+        assert not await provisioned.adapter.check_access(
+            Principal(id="user:ana"), "viewer", "document:unknown", "tenant:acme"
+        )
         assert await provisioned.adapter.check_access(
             Principal(id="user:carla"), "viewer", "document:acme-secret", "tenant:acme"
+        )
+        assert not await provisioned.adapter.check_access(
+            Principal(id="user:carla"), "viewer", "document:acme-secret", "tenant:beta"
         )
         result = await build_vertical_slice(provisioned.adapter).search_tenant(
             Principal(id="user:ana"), "tenant:acme", "release approval incident"

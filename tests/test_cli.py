@@ -3,16 +3,20 @@
 """Verify that the public CLI accurately communicates implemented capabilities."""
 
 import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from typer.testing import CliRunner
 
-from proofline.cli import app
+import proofline.cli as cli
+from proofline.authorization import StaticAuthorizationAdapter
+from proofline.domain import ScopedResource
 
 runner = CliRunner()
 
 
 def test_future_commands_are_explicitly_unavailable() -> None:
-    result = runner.invoke(app, ["query"])
+    result = runner.invoke(cli.app, ["query"])
 
     assert result.exit_code == 2
     assert "planned for Phase 6" in result.stdout
@@ -46,7 +50,7 @@ def test_ingest_writes_a_corpus_from_a_pinned_manifest(tmp_path) -> None:
     output = tmp_path / "corpus.jsonl"
 
     result = runner.invoke(
-        app,
+        cli.app,
         [
             "ingest",
             "--source-root",
@@ -64,7 +68,7 @@ def test_ingest_writes_a_corpus_from_a_pinned_manifest(tmp_path) -> None:
 
 
 def test_validate_data_accepts_the_versioned_fixtures() -> None:
-    result = runner.invoke(app, ["validate-data"])
+    result = runner.invoke(cli.app, ["validate-data"])
 
     assert result.exit_code == 0
     assert "Validated corpus-v0" in result.stdout
@@ -108,7 +112,7 @@ def test_ingest_writes_only_assigned_chunks_for_protected_documents(tmp_path) ->
     output = tmp_path / "corpus.jsonl"
 
     result = runner.invoke(
-        app,
+        cli.app,
         [
             "ingest",
             "--source-root",
@@ -127,7 +131,7 @@ def test_ingest_writes_only_assigned_chunks_for_protected_documents(tmp_path) ->
 
 
 def test_demo_tenant_search_prints_only_allowed_trace_candidates() -> None:
-    result = runner.invoke(app, ["demo-tenant-search", "--authorization", "static"])
+    result = runner.invoke(cli.app, ["demo-tenant-search", "--authorization", "static"])
 
     trace = json.loads(result.stdout)
     assert result.exit_code == 0
@@ -138,3 +142,48 @@ def test_demo_tenant_search_prints_only_allowed_trace_candidates() -> None:
         "chunk:public-policy",
         "chunk:acme-rollout",
     }
+
+
+def test_demo_tenant_search_uses_provisioned_openfga_adapter(monkeypatch) -> None:
+    adapter = StaticAuthorizationAdapter(
+        {
+            ("user:ana", "tenant:acme"): (
+                ScopedResource(tenant_id="tenant:acme", resource_id="document:acme-rollout"),
+            )
+        }
+    )
+    provisioned = SimpleNamespace(adapter=adapter, delete=AsyncMock())
+    provision = AsyncMock(return_value=provisioned)
+    monkeypatch.setattr(cli, "provision_openfga", provision)
+
+    result = runner.invoke(
+        cli.app,
+        ["demo-tenant-search", "--authorization", "openfga"],
+        env={"OPENFGA_URL": "http://openfga.test"},
+    )
+
+    assert result.exit_code == 0
+    assert {candidate["chunk_id"] for candidate in json.loads(result.stdout)["candidates"]} == {
+        "chunk:public-policy",
+        "chunk:acme-rollout",
+    }
+    provision.assert_awaited_once_with("http://openfga.test")
+    provisioned.delete.assert_awaited_once()
+
+
+def test_demo_check_access_uses_provisioned_openfga_adapter(monkeypatch) -> None:
+    adapter = SimpleNamespace(check_access=AsyncMock(return_value=True))
+    provisioned = SimpleNamespace(adapter=adapter, delete=AsyncMock())
+    provision = AsyncMock(return_value=provisioned)
+    monkeypatch.setattr(cli, "provision_openfga", provision)
+
+    result = runner.invoke(
+        cli.app,
+        ["demo-check-access", "--resource", "document:acme-rollout"],
+        env={"OPENFGA_URL": "http://openfga.test"},
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"allowed": True}
+    adapter.check_access.assert_awaited_once()
+    provisioned.delete.assert_awaited_once()

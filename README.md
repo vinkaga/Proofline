@@ -116,6 +116,33 @@ or security.
    poisoned-plan scenario, including the difference between insecure,
    ACL-filtered, and scope-preserving configurations.
 
+## Repository layout
+
+The repository separates the library, reference demonstration, and examples:
+
+```text
+src/proofline/                  published library only
+tests/core/                     library contract tests, Python 3.10–3.14
+
+reference-demo/                 reproducible OpenFGA/Qdrant public-data demo
+  src/proofline_reference_demo/
+  data/
+  tests/
+  .env.example
+
+examples/                       small, independent host integrations
+  custom-loop/
+  langchain-langgraph/
+  pydantic-ai/
+  llamaindex/
+```
+
+`proofline` has only core dependencies and never reads `.env`. The reference
+demo owns OpenFGA, Qdrant, MCP, Pydantic Settings, tracing, public data, and
+evaluation. Each example depends only on Proofline and its host framework, and
+routes its existing retriever through the same library boundary. Core, demo, and
+example tests run separately.
+
 ### Evaluation fixture
 
 The demonstration corpus uses version-pinned, public OpenFGA documentation,
@@ -422,13 +449,14 @@ latency, storage, or operational cost when enabled.
 ## Run the reference demonstration locally
 
 Prerequisites for the current reference demonstration: Python 3.13+,
-[uv](https://docs.astral.sh/uv/), and Docker. The core library's Python 3.10+
-compatibility is a planned packaging change.
+[uv](https://docs.astral.sh/uv/), and Docker. The core library supports Python
+3.10+ independently of this demonstration runtime.
 
 ```bash
+cd reference-demo
 uv sync --all-groups
 docker compose up -d
-uv run proofline --help
+uv run proofline-reference-demo --help
 ```
 
 Run the foundation checks with:
@@ -442,20 +470,20 @@ uv run pytest
 Run the deterministic access-gated fixture and inspect its JSON trace with:
 
 ```bash
-OPENFGA_URL=http://localhost:8080 uv run proofline demo-tenant-search
+OPENFGA_URL=http://localhost:8080 uv run proofline-reference-demo demo-tenant-search
 ```
 
 The same fixture exposes one authoritative permission decision with:
 
 ```bash
-OPENFGA_URL=http://localhost:8080 uv run proofline demo-check-access
+OPENFGA_URL=http://localhost:8080 uv run proofline-reference-demo demo-check-access
 ```
 
 Build and evaluate the pinned documentation corpus with a checkout at the
 revision named in `data/corpus/manifest.yaml`:
 
 ```bash
-uv run proofline evaluate-lexical --source-root /path/to/openfga.dev
+uv run proofline-reference-demo evaluate-lexical --source-root /path/to/openfga.dev
 ```
 
 This writes `artifacts/lexical-baseline.md` and one inspectable trace per
@@ -472,7 +500,7 @@ With local Qdrant running, compare its access-filtered dense-vector control to
 BM25 on the same corpus and cases:
 
 ```bash
-uv run proofline evaluate-dense --source-root /path/to/openfga.dev
+uv run proofline-reference-demo evaluate-dense --source-root /path/to/openfga.dev
 ```
 
 Pass `--recreate` to replace that command's named local collection on a repeat

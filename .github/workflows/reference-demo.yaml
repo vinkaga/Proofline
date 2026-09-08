@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Vinay Agarwal
+# Enforces the supported Python baseline and the project's local quality gate on PRs.
+
+name: Reference demonstration
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: reference-demo
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --all-groups
+      - run: uv run ruff check .
+      - run: uv run pyright
+      - run: uv run pytest
+      - run: docker compose up -d openfga
+      - run: until curl --fail --silent http://localhost:8080/healthz; do sleep 1; done
+      - run: OPENFGA_URL=http://localhost:8080 uv run pytest -m integration --no-cov
+      - if: always()
+        run: docker compose down --volumes

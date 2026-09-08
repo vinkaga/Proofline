@@ -3,31 +3,17 @@
 
 # Proofline
 
-Access-gated retrieval and bounded agent evaluation for reliable AI assistants.
+Capability-attenuating retrieval for permission-preserving multi-hop RAG.
 
-## Implemented now
+Proofline is a small Python library that wraps an application's existing
+retriever. Trusted application code supplies the caller context; on every
+retrieval hop, Proofline derives and applies the corresponding authorization
+filters. The model and retrieved documents may propose a query, but cannot
+broaden who, where, or what that query may retrieve.
 
-- Version-pinned public corpus manifests, deterministic paragraph chunking, and
-  source revision/URL provenance.
-- Synthetic tenant/resource assignments and typed validation of the corpus and
-  25-case release suite.
-- A static test adapter plus an OpenFGA-shaped authorization adapter.
-- BM25 retrieval that applies tenant ACL filtering before scoring candidates.
-- A reproducible lexical-baseline command that measures ACL-filtered Recall@k,
-  MRR, nDCG@k, latency, and unauthorized exposure, plus a local OpenFGA-backed
-  `demo-tenant-search` command.
-- Qdrant-backed dense retrieval with payload filters applied before candidates
-  are returned, and a reproducible dense-versus-lexical comparison command.
-- Access-filtered reciprocal-rank fusion and fixed-candidate reranking, with a
-  comparison command that retains lexical retrieval when added complexity loses.
-
-## Planned architecture
-
-The remaining architecture is intentional future work: MCP tool serving, a
-bounded agent, semantic embedding-model comparison,
-Phoenix tracing, and a release-gated end-to-end evaluation runner. The sections
-below describe that target system; they do not claim those capabilities already
-exist.
+It is not a RAG framework, agent runtime, vector store, or prompt-injection
+detector. It protects retrieval calls routed through its wrapper; it does not
+secure direct backend calls or decide whether content is factually trustworthy.
 
 ## The problem
 
@@ -44,12 +30,20 @@ Its defining invariant is:
 > Retrieval provides evidence. An authorization service decides what a
 > principal may retrieve or do. The assistant cannot override either boundary.
 
-## A concrete interaction
+Its defining scope-propagation rule is:
+
+> Retrieved content may provide evidence, but it cannot implicitly expand the
+> caller's retrieval authority.
+
+## Reference demonstration
+
+The repository includes a public-data reference demonstration and evaluation
+harness for the library. One permission scenario is:
 
 ```text
 User: Can Ana see the production rollout guide?
 
-1. The agent identifies a tenant-scoped permission question.
+1. The host application identifies a tenant-scoped permission question.
 2. The authorization service evaluates
    check_access(user:ana, viewer, document:production-rollout-guide).
 3. The decision is deny. Proofline does not retrieve the guide or pass any of
@@ -61,15 +55,18 @@ User: Can Ana see the production rollout guide?
 
 A relevant answer is still a failure if it exposes the wrong evidence.
 
-## What Proofline demonstrates
+## What the reference demonstration evaluates
 
 - **Access-gated retrieval.** Before a tenant-scoped search returns content,
   the retrieval layer receives the requester's authorized tenant and resource
   scope. Results outside that scope cannot enter the candidate set, trace,
   prompt context, or response.
-- **Bounded agentic retrieval.** The agent classifies the question, obtains
-  authorization when necessary, retrieves evidence, may reformulate a query
-  once under defined conditions, then answers with citations or abstains.
+- **Permission-preserving multi-hop retrieval.** A trusted request scope is
+  propagated to every retrieval step. A later step may narrow that scope, but
+  retrieved text cannot supply a principal, tenant, resource filter, or
+  authorization decision that widens it.
+- **Bounded host-controlled retrieval.** The host may perform one tested,
+  scope-preserving follow-up step before answering with citations or abstaining.
 - **Measured retrieval choices.** A keyword baseline, vector retrieval, hybrid
   retrieval, and optional reranking are compared on the same versioned corpus
   and relevance set. Embedding models are compared on quality, latency, and
@@ -81,26 +78,54 @@ A relevant answer is still a failure if it exposes the wrong evidence.
   run records candidates, scores, tool calls, citations, outcomes, latency, and
   configuration.
 
-## How Proofline differs from retrieval frameworks
+## What Proofline is and is not
 
-LangChain, LlamaIndex, Haystack, and similar frameworks can assemble retrieval,
-tool use, and evaluation components. Proofline is not a replacement for them.
-It makes a narrower contract explicit and testable: authorization constrains the
-retrieval candidate universe before model context is assembled, the agent has a
-small action budget, and protected outcomes are release-gated in CI. Evaluation
-libraries can score parts of that system, but they do not by themselves enforce
-this architecture or its security invariants.
+Proofline's target product is a small, framework-neutral retrieval wrapper. It
+is not a RAG framework, agent runtime, planner, vector store, prompt-injection
+classifier, policy-language platform, chat application, or authorization engine.
+
+LangChain, LangGraph, LlamaIndex, Haystack, custom Python loops, and other
+systems can keep their own orchestration and document models. Proofline sits at
+their retrieval boundary. Every retrieval routed through it receives the
+authenticated caller's authorized scope or a stricter descendant scope.
+
+It does not replace an application's retriever, vector database, planner, or
+document schema; build an ANN algorithm, embedding model, or a fleet of agents;
+or optimize a leaderboard score without explaining the observed failures and
+trade-offs.
+
+It does not claim to solve prompt injection, factual poisoning, or calls that
+bypass the wrapper. Its narrow guarantee is architectural and testable:
+retrieval performed through Proofline cannot implicitly receive broader
+authority from model or retrieved-text output. It is a reference implementation
+and evaluation harness, not a claim of production-grade identity, multi-tenancy,
+or security.
 
 ## What it contains
 
-The corpus uses version-pinned, public OpenFGA documentation, examples, and
-selected issue discussions. The source material is real. A synthetic
-organization, tenant, project, resource, and relationship model creates
-controlled allow and deny cases without using private information.
+1. **The target library.** A framework-neutral scoped-retrieval wrapper that
+   derives filters from trusted caller context before every retrieval hop.
+2. **A layered test and evaluation suite.** Unit, functional, adversarial, and
+   end-to-end cases exercise scope attenuation, retrieval isolation, citations,
+   abstention, bounded follow-ups, and regression gates.
+3. **Real integration examples.** Small custom-loop, LangChain/LangGraph,
+   Pydantic AI, and LlamaIndex examples route their existing retriever through
+   the same wrapper, without adopting a new RAG runtime or document model.
+4. **A reproducible public-data demonstration.** A version-pinned corpus and
+   synthetic access relationships show both ordinary multi-hop retrieval and a
+   poisoned-plan scenario, including the difference between insecure,
+   ACL-filtered, and scope-preserving configurations.
+
+### Evaluation fixture
+
+The demonstration corpus uses version-pinned, public OpenFGA documentation,
+examples, and selected issue discussions. The source material is real. A
+synthetic organization, tenant, project, resource, and relationship model
+creates controlled allow and deny cases without using private information.
 
 Every chunk carries source revision, tenant and resource identifiers, visibility,
 and a source URL. Public chunks are available to every principal. Tenant-scoped
-chunks are available only when the authorization adapter includes their resource
+chunks are available only when the authorization backend includes their resource
 in the requester's permitted scope.
 
 Questions intentionally mix three kinds of work:
@@ -122,26 +147,20 @@ reproduce and evaluate.
 ### Threat model and limits
 
 Proofline verifies that unauthorized chunks, chunk metadata, citations, and
-prompt context do not leave the access-filtered retrieval path. Its adversarial
-cases include cross-tenant queries, identifier guessing, partial-access
-hierarchies, and instruction-like text embedded in documents.
+prompt context do not leave the access-filtered retrieval path. Its target
+adversarial evaluation additionally tests whether an authorized shared document
+can steer a multi-hop planner toward an out-of-scope resource. A valid proposed
+step carries a query and parent-step reference, not scope-bearing fields. The
+wrapper rejects attempts to supply a principal, tenant, resource filter, or ACL
+field, and executes every valid query only with inherited, server-derived
+authorization filters. Query text is not treated as reliable evidence of an
+intended authority change.
 
-It does not claim to eliminate every information side channel. Response timing,
-result-count differences, and broader identity or transport security require
-separate production controls. Those boundaries are documented rather than
-silently treated as solved.
-
-## Deliberate boundaries
-
-- Building a polished chat application or a general agent framework.
-- Claiming production-grade identity, multi-tenancy, or security from a local
-  demonstration.
-- Building a vector database, ANN algorithm, embedding model, or authorization
-  engine from scratch.
-- Optimizing a leaderboard score without analyzing why a system succeeds or
-  fails.
-- Adding multimodal ingestion, a fleet of agents, or integrations unrelated to
-  the core access-gated retrieval question.
+It does not claim to eliminate every information side channel or identify every
+poisoned document. Response timing, result-count differences, factual
+misinformation, broader identity/transport security, and misuse of resources
+the caller is already allowed to access require separate controls. Those
+boundaries are documented rather than silently treated as solved.
 
 ## Design principles
 
@@ -152,29 +171,60 @@ retrieval returns protected content. The retrieval system supplies evidence for
 an explanation. The orchestrator keeps those responsibilities separate and
 records the decision path.
 
-### Start with baselines
+### Attenuate authority across hops
+
+A trusted application creates a request scope after authentication and
+authorization. The model may propose a query, but not an effective principal,
+tenant, resource filter, or permission. Every child retrieval scope is equal to
+or narrower than its parent. A real workspace change is a separate trusted
+authorization operation, never a side effect of retrieved text.
+
+The recommended integration is a wrapped existing retriever:
+
+```python
+retriever = proofline.scoped(existing_retriever, authorization=authz)
+results = await retriever.search(
+    "rollout prerequisites",
+    context=request_context_from_authenticated_user,
+    limit=5,
+)
+```
+
+The lower-level explicit scope API remains available for trees, parallel workers,
+and custom policy flows, but ordinary users should not manage scope algebra.
+Underneath, the wrapper targets the ordinary Python retrieval shape: a sync or
+async callable/protocol that accepts `query`, enforced `filters`, and `limit`.
+It preserves the application's document/result model rather than imposing a
+new one.
+
+### Reference-demo principles
+
+The following principles govern the public demonstration and evaluation harness;
+they do not make Proofline an agent or retrieval framework.
+
+#### Start with baselines
 
 Each retrieval improvement must beat or clarify a measurable baseline. The
 first comparison is lexical retrieval versus vector retrieval. Hybrid retrieval
 and reranking are added only when the evaluation set shows a specific weakness
 they address.
 
-### Let the agent take only bounded, testable actions
+#### Keep host-controlled actions bounded and testable
 
-The agent has a small action budget: classify the question, resolve
-authorization when needed, retrieve only permitted evidence, optionally
-reformulate once or decompose one retry-eligible compound question into at most
-two subqueries when evidence is insufficient, then answer or abstain. It does
-not freely plan, call arbitrary tools, retrieve after a denial, or iterate until
-it appears confident. Every step is part of the trace and evaluation contract.
+The reference host has a small action budget: classify the question, resolve
+authorization when needed, retrieve only permitted evidence, optionally perform
+one scope-preserving follow-up retrieval, then answer or abstain. It does not
+freely plan, call arbitrary tools, mutate authority, retrieve after a denial,
+or iterate until it appears confident. Every step is part of the trace and
+evaluation contract.
 
-### Make failure a first-class result
+#### Make failure a first-class result
 
 "I do not have enough evidence" and "I cannot determine access without the
 authorization tool" are valid outcomes. The system should abstain rather than
 invent a citation, a policy interpretation, or a permission result.
 
-### Prefer deterministic checks where possible
+#### Prefer deterministic checks where possible
 
 Tool selection, authorization results, response schemas, citation IDs, and
 required refusals should be checked deterministically. Model-based graders are
@@ -182,13 +232,13 @@ reserved for open-ended properties such as explanation quality and whether an
 answer is well grounded. They will be calibrated against a small human-reviewed
 set.
 
-### Keep every result reproducible
+#### Keep every result reproducible
 
 The corpus snapshot, chunking configuration, embedding model, retriever
 configuration, reranker, prompt version, model version, and evaluation set are
 recorded with each run.
 
-## How it works
+## Reference-demo flow
 
 ```text
 version-pinned corpus
@@ -199,23 +249,22 @@ ingest -> chunk + attach access metadata -> tenant/public indexes
 user question
         |
         v
-bounded agent ---- permission question? ----> check_access
+trusted request scope ---- permission question? ----> check_access
         |                         |                 |
         |                         |                 +--> allow or deny
         |                         v
         |                 resolve authorized scope
         |                         |
         v                         v
-public retrieval --------> ACL-filtered retrieval ---> ranked evidence
+host proposes step ------> scoped retrieval wrapper ---> ranked evidence
         |                         |                         |
+        |                         +--> reject scope-bearing input
         +-------------------------+-------------------------+
                                   |
-           retry eligible and evidence insufficient?
-                                  |
-             one query reformulation or decomposition
+                  bounded follow-up under equal-or-narrower scope
                                   |
                                   v
-                         one additional retrieval
+                         one additional filtered retrieval
                                   |
                                   v
                     cited answer, denial, or abstention
@@ -224,17 +273,18 @@ public retrieval --------> ACL-filtered retrieval ---> ranked evidence
                          trace + evaluation runner
 ```
 
-The retrieval layer applies scope before returning candidates. Public and
+The scoped wrapper applies scope before returning candidates. Public and
 tenant-scoped indexes are separate namespaces. A policy-derived resource
 allowlist further constrains tenant-scoped retrieval. This makes access control
-a property of retrieval itself, not a filter applied after an LLM has seen the
-results.
+a property of every retrieval hop, not a filter applied after an LLM has seen
+the results.
 
-Question classification can be deterministic. An LLM is used only for bounded
-query reformulation and response composition. That separation makes the access
-boundary and the agent's additional value easy to inspect and test.
+Question classification can be deterministic. The demonstration uses an LLM
+only for bounded query reformulation and response composition. That separation
+makes the access boundary and the host's additional value easy to inspect and
+test.
 
-## Retrieval experiments
+## Reference-demo retrieval experiments
 
 | Stage | Method | Purpose |
 | --- | --- | --- |
@@ -250,11 +300,11 @@ candidate universe, not against documents the principal is not permitted to
 see. Changing more than one variable at a time makes results difficult to
 interpret.
 
-## Evaluation
+## Reference-demo evaluation
 
 The evaluation set has three tiers. The release suite contains roughly 50 to 75
 hand-authored, versioned cases that gate changes. An adversarial suite adds
-cross-tenant, partial-access, identifier-guessing, prompt-injection, and
+cross-tenant, partial-access, identifier-guessing, instruction-like
 existence-inference probes. A later expansion set adds held-out, realistically
 authored questions. Generated cases may add stress coverage but are not the
 quality source of truth.
@@ -267,7 +317,8 @@ quality source of truth.
 | Abstention | Whether unsupported or ambiguous questions avoid invented answers | exact expected outcome |
 | Tool behavior | Whether access questions call the tool with correct arguments | tool-call and result assertions |
 | Authorization | Whether allowed and denied cases match the policy model | exact expected decision |
-| Agent trace | Whether query reformulation and retrieval follow the permitted action budget | trace assertions and pass rate |
+| Scope propagation | Whether every child retrieval is equal to or narrower than its parent and poison cannot supply authority | rejected scope-bearing inputs, unauthorized exposure, scope-lineage checks |
+| Host trace | Whether follow-up retrieval follows the permitted action budget and inherited scope | trace assertions and pass rate |
 | End to end | Whether the final answer, citations, tool behavior, and refusal behavior work together | pass rate by scenario type |
 | Regression | Whether a proposed change degrades a protected metric or case | CI comparison to baseline |
 
@@ -283,10 +334,12 @@ Initial case categories:
 - Ambiguous queries where one reformulation is useful, and cases where it must
   not be attempted.
 - Cross-tenant, partial-access, and identifier-guessing probes.
-- Prompt-injection-like text embedded in the corpus, to test that documents
-  are evidence rather than instructions.
+- Authorized shared documents containing realistic instruction-like
+  cross-references, to test that documents are evidence rather than authority.
+- Clean and poisoned multi-hop counterparts, plus benign documents that discuss
+  security, to measure both attack handling and false blocks.
 
-## Quality gates
+## Reference-demo quality gates
 
 A change should fail CI when it:
 
@@ -295,6 +348,8 @@ A change should fail CI when it:
 - produces a citation that is absent or does not support the answer;
 - fails a mandatory abstention case;
 - exposes an unauthorized chunk;
+- permits an authority-expanding retrieval step without a separate trusted
+  authorization operation;
 - exceeds the allowed agent action budget; or
 - regresses a protected retrieval or end-to-end metric beyond the agreed
   tolerance.
@@ -303,22 +358,25 @@ The project should report trade-offs, not hide them. For example, a reranker
 may improve nDCG while increasing latency. A result is useful even when the
 new method loses, provided the evaluation explains why.
 
-## Trace record
+## Reference-demo trace record
 
 Each evaluated interaction should write a structured record with:
 
 - case and corpus version;
 - request mode and resolved access scope;
+- root/parent/child scope identifiers, policy version, and allow/deny/requires-
+  approval decision for every proposed retrieval step;
 - retrieval method, candidates, ranks, and scores;
 - the permitted chunk IDs supplied to response context;
-- router decision and tool calls with redacted inputs and outputs;
+- evidence provenance, including source revision and parent retrieval step;
+- host decision and tool calls with redacted inputs and outputs;
 - final answer, citations, and abstention state;
 - latency and token or cost metadata when applicable; and
 - deterministic checks and model-grader results.
 
 No secrets, private documents, or personal data belong in the repository.
 
-## Operational view
+## Reference-demo operational view
 
 The evaluation runner produces a compact quality view for each corpus and
 configuration version: pass rate by request mode, ACL-filtered retrieval
@@ -334,34 +392,38 @@ measured corpus and documented model pricing.
 
 ## Technology choices
 
-Proofline uses a small, current Python stack. Each dependency supports a
-specific part of the access-gated retrieval contract.
+### Core library
 
 | Concern | Choice | Role in Proofline |
 | --- | --- | --- |
-| Runtime and packaging | Python 3.13+ and `uv` | Modern type syntax, reproducible environments, and fast dependency management. CI tests the supported baseline. |
-| Contracts | Pydantic | Typed request modes, tool arguments, traces, citations, and evaluation-case schemas. |
-| Authorization | OpenFGA and `openfga-sdk` | `ListObjects` resolves permitted scope. `Check` makes authoritative access decisions. |
-| Retrieval | Qdrant and `qdrant-client` | Local dense, hybrid, and payload-filtered retrieval. Qdrant payload filters enforce tenant, resource, and visibility constraints during search. |
-| Lexical baseline | BM25 | A transparent baseline for exact terminology and identifiers, evaluated under the same access filter. |
-| Tool boundary | Official MCP Python SDK | Exposes `check_access` as a typed tool without turning the project into an MCP platform. |
-| Evaluation | `pytest` and `ir_measures` | Deterministic authorization and tool assertions, plus standard retrieval metrics in CI. |
-| Traces | OpenTelemetry and Phoenix | Trace visualization and evaluation inspection. Proofline's structured trace remains the source artifact. |
+| Compatibility | Python 3.10–3.14 | Target public-library support; Python 3.11+ is recommended. The current reference demonstration remains on Python 3.13 while compatibility work is completed. |
+| Integration contract | Python protocol/callable | Wraps a host retriever using `query`, enforced `filters`, and `limit`, without imposing a document model. |
+| Contracts | Standard-library dataclasses/protocols and `typing-extensions` | Typed, 3.10-compatible public contracts without imposing Pydantic on the host application. |
 
-Embedding and reranker providers sit behind small internal interfaces. The
-evaluation results, rather than a provider name in the implementation, decide
-which model is useful for a given corpus.
+### Reference demonstration
 
-The index can be rebuilt from the pinned corpus for the initial project.
-Incremental indexing, caching, remote index operations, and more complex policy
-models are extensions to justify with measured need, not prerequisites.
+| Concern | Choice | Role in the demonstration |
+| --- | --- | --- |
+| Authorization | OpenFGA and `openfga-sdk` | `ListObjects` resolves permitted scope; `Check` makes authoritative permission decisions. |
+| Retrieval | BM25, Qdrant, and `qdrant-client` | Compares lexical, dense, hybrid, and reranked retrieval under the same filters. |
+| Tool boundary | Official MCP Python SDK | Demonstrates an authoritative `check_access` tool. |
+| Configuration | Pydantic Settings and local `.env` | Configures the demonstration only; the core library never reads host environment or secret files. |
+| Evaluation | `pytest` and `ir_measures` | Provides deterministic assertions and standard retrieval metrics. |
+| Traces | OpenTelemetry and Phoenix | Supports trace visualization; the structured trace remains the source artifact. |
 
-LangGraph is deliberately not required. The initial bounded agent is a direct,
-typed state machine so that its decision path remains obvious and testable.
+Embedding and reranker providers are demonstration components selected by
+evaluation results, not dependencies of the core library.
 
-## Local setup
+The demonstration index can be rebuilt from the pinned corpus. Optional library
+policy layers—provenance export, revocation, cache partitioning, approval,
+budgets, and tool governance—must be disabled by default and document their
+latency, storage, or operational cost when enabled.
 
-Prerequisites: Python 3.13+, [uv](https://docs.astral.sh/uv/), and Docker.
+## Run the reference demonstration locally
+
+Prerequisites for the current reference demonstration: Python 3.13+,
+[uv](https://docs.astral.sh/uv/), and Docker. The core library's Python 3.10+
+compatibility is a planned packaging change.
 
 ```bash
 uv sync --all-groups
@@ -400,9 +462,10 @@ This writes `artifacts/lexical-baseline.md` and one inspectable trace per
 retrieval-path case to `artifacts/lexical-baseline-traces.jsonl`. It scores the
 reviewed evidence-retrieval cases at a fixed `k` and records latency plus
 independent access-scope and citation-provenance checks. Permission cases remain
-outside these ranking metrics; their release-gated evaluation arrives in Phase 7.
+outside these ranking metrics; the scope-propagation release gate is evaluated
+separately.
 The offline baseline derives direct-viewer grants from the checked-in OpenFGA
-tuples; inherited relationship behavior remains covered by the OpenFGA adapter
+tuples; inherited relationship behavior remains covered by the OpenFGA backend
 and integration tests.
 
 With local Qdrant running, compare its access-filtered dense-vector control to
@@ -425,7 +488,9 @@ endpoint only; it does not use a chat or reasoning model.
 
 The built-in token-hash embedding is deterministic and zero-cost; it validates
 the Qdrant boundary and provides a reproducible control, not a claim of
-semantic-model quality. A learned embedding-model comparison is future work.
+semantic-model quality. Compare learned models with the same ACL-filtered suite
+through `evaluate-hybrid`; reports record quality, latency, index size, and
+embedding/query cost for each run.
 
 To run the real OpenFGA policy integration test, start the local service and
 set its URL for pytest:
@@ -438,9 +503,7 @@ OPENFGA_URL=http://localhost:8080 uv run pytest -m integration --no-cov
 The focused integration command disables the repository-wide coverage gate;
 run `uv run pytest` without test selection to enforce the 85% coverage threshold.
 
-The test suite enforces more than 85% branch coverage. Ingestion, querying,
-evaluation, and reporting commands become available as the corresponding
-capabilities are implemented.
+The test suite enforces more than 85% branch coverage.
 
 ## How to extend it
 
@@ -451,38 +514,24 @@ it.
 
 Useful extensions include:
 
-- **A different corpus.** Replace the OpenFGA corpus with a versioned set of
-  product, API, or support documents. Preserve source provenance, resource
-  boundaries, and relevance cases drawn from real information needs rather
-  than synthetic prompts.
-- **A stronger retrieval stack.** Try a different embedding model, fusion
-  method, or reranker. Report both ranking quality and latency, including the
-  queries that changed most.
-- **More authorization complexity.** Add resource hierarchies, delegated
-  agents, time-bounded grants, or multi-tenant isolation. Extend the policy
-  cases before changing the tool.
-- **A more capable agent.** Add another carefully scoped tool or a second
-  reasoning step. Preserve a strict action budget and evaluate the complete
-  trace, not only the final wording.
-- **Production-facing operations.** Add dataset approval workflows, scheduled
-  evaluation runs, dashboards, alerts, or a CI release gate.
+- **Retriever backends.** Implement the standard retrieval protocol for a
+  different vector store, search engine, or application-specific retriever.
+  Proofline supplies authorization-derived filters; the host keeps its document
+  and result model.
+- **Policy layers.** Add opt-in provenance export, revocation checks, cache
+  partitioning, approval requirements, retrieval budgets, or tool governance.
+  Document the layer's latency, storage, and operational cost.
+- **Execution shapes.** Add parallel branches, a deeper bounded retrieval tree,
+  or a framework integration. The library remains at the retrieval boundary;
+  the host still owns planning and orchestration.
+- **Evaluation fixtures.** Add a versioned public corpus and synthetic access
+  relationships for a new domain. Preserve source provenance, resource
+  boundaries, clean tasks, adversarial counterparts, and deterministic checks.
 
-The project should not grow into a collection of integrations. Each extension
-should clarify one engineering question, establish a baseline, and leave behind
-a reproducible result.
-
-## Why this is useful
-
-The value is not a chat screenshot. It is an evidence-backed engineering
-artifact:
-
-1. A baseline made retrieval limitations visible.
-2. Each retrieval and embedding choice was tested against a fixed,
-   access-aware evaluation set.
-3. The system enforced authorization before an LLM could see protected evidence
-   and kept explanation separate from authorization decisions.
-4. A bounded agent improved retrieval without becoming an opaque planner.
-5. Traces and quality gates made failures and trade-offs inspectable.
+Every extension may narrow, approve, or reject authority; it must never silently
+widen it. The project should not grow into a collection of integrations. Each
+extension should clarify one engineering question, establish a baseline, and
+leave behind a reproducible result.
 
 ## License
 

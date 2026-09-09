@@ -24,6 +24,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run pyright
       - run: uv run pytest
+      - run: uv run proofline-reference-demo evaluate
       - run: docker compose up -d openfga
       - run: until curl --fail --silent http://localhost:8080/healthz; do sleep 1; done
       - run: OPENFGA_URL=http://localhost:8080 uv run pytest -m integration --no-cov

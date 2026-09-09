@@ -17,6 +17,7 @@ from proofline_reference_demo.scoped_fixture import DemoRequestContext, build_sc
 from proofline_reference_demo.vertical_slice import vertical_slice_chunks
 
 _POISON_MARKER = "PLANNER_FIXTURE: "
+_BENIGN_MARKER = "BENIGN_PLANNER_FIXTURE: "
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +59,7 @@ def _scope_trace(scope: RetrievalScope) -> ScopeTrace:
     )
 
 
-def _poisoned_proposal_from_initial(
+def poisoned_proposal_from_initial(
     initial_candidate_ids: tuple[str, ...],
 ) -> tuple[str, Mapping[str, object]]:
     """Extract the deliberately untrusted fixture proposal from retrieved evidence.
@@ -83,6 +84,30 @@ def _poisoned_proposal_from_initial(
     return source_chunk.id, cast(Mapping[str, object], parsed)
 
 
+def _benign_proposal_from_initial(
+    initial_candidate_ids: tuple[str, ...],
+) -> tuple[str, Mapping[str, object]]:
+    """Extract a data-only proposal from an authorized public security document."""
+
+    source_chunk = next(
+        (
+            chunk
+            for chunk in vertical_slice_chunks()
+            if chunk.id == "chunk:public-security-guidance"
+        ),
+        None,
+    )
+    if source_chunk is None or source_chunk.id not in initial_candidate_ids:
+        raise ValueError("benign fixture requires the public security-guidance chunk")
+    _, separator, serialized = source_chunk.content.partition(_BENIGN_MARKER)
+    if not separator:
+        raise ValueError("benign fixture is missing its planner proposal")
+    parsed = json.loads(serialized)
+    if not isinstance(parsed, dict) or not all(isinstance(key, str) for key in parsed):
+        raise ValueError("benign fixture proposal must be a string-keyed object")
+    return source_chunk.id, cast(Mapping[str, object], parsed)
+
+
 async def run_clean_two_hop(
     authorization: AuthorizationAdapter,
     *,
@@ -97,9 +122,7 @@ async def run_clean_two_hop(
         nonlocal retrieval_hop_count
         retrieval_hop_count += 1
 
-    retriever = build_scoped_fixture(
-        authorization, max_follow_ups=1, on_retrieval=count_retrieval
-    )
+    retriever = build_scoped_fixture(authorization, max_follow_ups=1, on_retrieval=count_retrieval)
     initial = await retriever.search(
         "acme rollout approval",
         context=DemoRequestContext(principal=principal, tenant_id=tenant_id),
@@ -120,6 +143,44 @@ async def run_clean_two_hop(
     )
 
 
+async def run_benign_two_hop(
+    authorization: AuthorizationAdapter,
+    *,
+    principal: Principal,
+    tenant_id: str,
+) -> MultiHopTrace:
+    """Accept a data-only proposal that cannot affect retrieval authority.
+
+    This is the benign counterpart to the poisoned fixture.  It proves that the
+    proposal boundary is not a blanket ban on planner-directed follow-ups.
+    """
+
+    retrieval_hop_count = 0
+
+    def count_retrieval(_: str, __: ScopeFilters) -> None:
+        nonlocal retrieval_hop_count
+        retrieval_hop_count += 1
+
+    retriever = build_scoped_fixture(authorization, max_follow_ups=1, on_retrieval=count_retrieval)
+    initial = await retriever.search(
+        "public scope guidance",
+        context=DemoRequestContext(principal=principal, tenant_id=tenant_id),
+    )
+    source_chunk_id, raw_proposal = _benign_proposal_from_initial(
+        tuple(candidate.chunk_id for candidate in initial.items)
+    )
+    proposed = ProposedRetrievalStep.from_untrusted(raw_proposal)
+    follow_up = await retriever.follow_proposed(initial, proposed)
+    return MultiHopTrace(
+        scenario="benign",
+        initial_candidate_ids=tuple(candidate.chunk_id for candidate in initial.items),
+        follow_up_candidate_ids=tuple(candidate.chunk_id for candidate in follow_up.items),
+        scopes=(_scope_trace(initial.scope), _scope_trace(follow_up.scope)),
+        retrieval_hop_count=retrieval_hop_count,
+        proposal_source_chunk_id=source_chunk_id,
+    )
+
+
 async def run_poisoned_two_hop(
     authorization: AuthorizationAdapter,
     *,
@@ -134,14 +195,12 @@ async def run_poisoned_two_hop(
         nonlocal retrieval_hop_count
         retrieval_hop_count += 1
 
-    retriever = build_scoped_fixture(
-        authorization, max_follow_ups=1, on_retrieval=count_retrieval
-    )
+    retriever = build_scoped_fixture(authorization, max_follow_ups=1, on_retrieval=count_retrieval)
     initial = await retriever.search(
         "acme rollout approval",
         context=DemoRequestContext(principal=principal, tenant_id=tenant_id),
     )
-    source_chunk_id, raw_proposal = _poisoned_proposal_from_initial(
+    source_chunk_id, raw_proposal = poisoned_proposal_from_initial(
         tuple(candidate.chunk_id for candidate in initial.items)
     )
     try:

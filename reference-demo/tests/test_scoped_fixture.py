@@ -33,5 +33,6 @@ def test_scoped_fixture_uses_core_scope_filters_before_ranking() -> None:
     assert {candidate.resource_id for candidate in results.items} == {
         "document:acme-rollout",
         "document:public-policy",
+        "document:public-security-guidance",
     }
     assert results.scope.filters["resource_id"] == frozenset({"document:acme-rollout"})

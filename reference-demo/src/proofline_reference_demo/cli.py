@@ -48,6 +48,11 @@ from proofline_reference_demo.permission_mcp import build_permission_server
 from proofline_reference_demo.reranking import RerankingRetriever, TokenCoverageReranker
 from proofline_reference_demo.retrieval import AccessGatedBm25Retriever, RetrievalResult
 from proofline_reference_demo.retrieval_comparison import write_method_comparison_report
+from proofline_reference_demo.scope_evaluation import (
+    ScopeGateError,
+    evaluate_scope_propagation,
+    validate_scope_propagation,
+)
 from proofline_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
 from proofline_reference_demo.tracing import trace_tenant_retrieval
 
@@ -395,9 +400,17 @@ def query(
 
 @app.command()
 def evaluate() -> None:
-    """Evaluate a configuration. Available in Phase 7."""
+    """Run the deterministic scope-propagation release gate."""
 
-    _not_available("evaluate", phase=7)
+    report = asyncio.run(
+        evaluate_scope_propagation(StaticAuthorizationAdapter(load_static_permissions()))
+    )
+    typer.echo(json.dumps(report.as_dict(), indent=2))
+    try:
+        validate_scope_propagation(report)
+    except ScopeGateError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
 
 
 @app.command()

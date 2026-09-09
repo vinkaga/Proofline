@@ -63,6 +63,7 @@ async def test_checked_in_model_enforces_tenant_membership_and_scope() -> None:
         )
         assert {candidate.chunk_id for candidate in results.items} == {
             "chunk:public-policy",
+            "chunk:public-security-guidance",
             "chunk:acme-rollout",
         }
         assert results.scope.filters["resource_id"] == frozenset({"document:acme-rollout"})

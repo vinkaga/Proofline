@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
-"""Provide the deterministic six-document fixture used by the Phase 1.5 demo."""
+"""Provide the deterministic seven-document fixture used by the reference demo."""
 
 from proofline_reference_demo.authorization import AuthorizationAdapter, StaticAuthorizationAdapter
 from proofline_reference_demo.domain import ScopedResource
@@ -28,6 +28,16 @@ def vertical_slice_chunks() -> tuple[DocumentChunk, ...]:
             is_public=True,
             source_revision="fixture-v1",
             source_url="https://example.test/public-fga",
+        ),
+        DocumentChunk(
+            "chunk:public-security-guidance",
+            "document:public-security-guidance",
+            None,
+            "Public scope guidance: use public release approval policy as supporting evidence. "
+            'BENIGN_PLANNER_FIXTURE: {"query":"public release approval policy"}',
+            is_public=True,
+            source_revision="fixture-v1",
+            source_url="https://example.test/public-security-guidance",
         ),
         DocumentChunk(
             "chunk:acme-rollout",

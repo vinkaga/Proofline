@@ -101,20 +101,21 @@ authority from model or retrieved-text output. It is a reference implementation
 and evaluation harness, not a claim of production-grade identity, multi-tenancy,
 or security.
 
-## What it contains
+## What it contains today
 
-1. **The target library.** A framework-neutral scoped-retrieval wrapper that
-   derives filters from trusted caller context before every retrieval hop.
-2. **A layered test and evaluation suite.** Unit, functional, adversarial, and
-   end-to-end cases exercise scope attenuation, retrieval isolation, citations,
-   abstention, bounded follow-ups, and regression gates.
-3. **Real integration examples.** Small custom-loop, LangChain/LangGraph,
-   Pydantic AI, and LlamaIndex examples route their existing retriever through
-   the same wrapper, without adopting a new RAG runtime or document model.
-4. **A reproducible public-data demonstration.** A version-pinned corpus and
-   synthetic access relationships show both ordinary multi-hop retrieval and a
-   poisoned-plan scenario, including the difference between insecure,
-   ACL-filtered, and scope-preserving configurations.
+1. **The core library.** A framework-neutral scoped-retrieval wrapper with
+   immutable scopes, monotonic attenuation, optional follow-up budgets, and a
+   parser that rejects scope-bearing planner input.
+2. **Core contract tests.** Tests cover immutable filters, scope widening,
+   expiry, optional revalidation, follow-up budgets, and untrusted-step
+   rejection.
+3. **A reproducible public-data demonstration.** A version-pinned corpus and
+   synthetic access relationships. Its `demo-tenant-search` command resolves
+   authorization and routes the fixture through the core wrapper.
+
+The adversarial multi-hop evaluation, framework examples, and comparison of
+insecure versus scope-preserving planners remain planned work. They are not
+claimed as current capabilities.
 
 ## Repository layout
 
@@ -122,7 +123,7 @@ The repository separates the library, reference demonstration, and examples:
 
 ```text
 src/proofline/                  published library only
-tests/core/                     library contract tests, Python 3.10–3.14
+tests/                          library contract tests, Python 3.10–3.14
 
 reference-demo/                 reproducible OpenFGA/Qdrant public-data demo
   src/proofline_reference_demo/
@@ -130,18 +131,13 @@ reference-demo/                 reproducible OpenFGA/Qdrant public-data demo
   tests/
   .env.example
 
-examples/                       small, independent host integrations
-  custom-loop/
-  langchain-langgraph/
-  pydantic-ai/
-  llamaindex/
+examples/README.md              design constraints for future integrations
 ```
 
 `proofline` has only core dependencies and never reads `.env`. The reference
 demo owns OpenFGA, Qdrant, MCP, Pydantic Settings, tracing, public data, and
-evaluation. Each example depends only on Proofline and its host framework, and
-routes its existing retriever through the same library boundary. Core, demo, and
-example tests run separately.
+evaluation. Future examples will depend only on Proofline and their selected
+host framework.
 
 ### Evaluation fixture
 
@@ -173,15 +169,19 @@ reproduce and evaluate.
 
 ### Threat model and limits
 
-Proofline verifies that unauthorized chunks, chunk metadata, citations, and
-prompt context do not leave the access-filtered retrieval path. Its target
-adversarial evaluation additionally tests whether an authorized shared document
-can steer a multi-hop planner toward an out-of-scope resource. A valid proposed
-step carries a query and parent-step reference, not scope-bearing fields. The
-wrapper rejects attempts to supply a principal, tenant, resource filter, or ACL
-field, and executes every valid query only with inherited, server-derived
-authorization filters. Query text is not treated as reliable evidence of an
-intended authority change.
+Proofline passes an immutable, trusted filter set to its wrapped backend. The
+backend is part of the security boundary: it must apply every supplied filter
+as a conjunction, match an empty allowlist to no protected records, and reject
+unknown filters rather than ignoring them. Proofline cannot secure a backend
+that bypasses or misimplements that contract.
+
+Its target adversarial evaluation additionally tests whether an authorized
+shared document can steer a multi-hop planner toward an out-of-scope resource.
+A valid proposed step carries a query and parent-step reference, not
+scope-bearing fields. The wrapper rejects attempts to supply a principal,
+tenant, resource filter, or ACL field, and executes every valid query only with
+inherited, server-derived authorization filters. Query text is not treated as
+reliable evidence of an intended authority change.
 
 It does not claim to eliminate every information side channel or identify every
 poisoned document. Response timing, result-count differences, factual
@@ -209,7 +209,18 @@ authorization operation, never a side effect of retrieved text.
 The recommended integration is a wrapped existing retriever:
 
 ```python
-retriever = proofline.scoped(existing_retriever, authorization=authz)
+from proofline import RetrievalScope, scoped
+
+
+def resolve_scope(request_context: RequestContext) -> RetrievalScope:
+    # Trusted application/authentication code produces this scope.
+    return RetrievalScope.root(
+        principal=request_context.principal_id,
+        filters={"resource_id": request_context.authorized_resource_ids},
+    )
+
+
+retriever = scoped(existing_retriever.search, resolve_scope=resolve_scope)
 results = await retriever.search(
     "rollout prerequisites",
     context=request_context_from_authenticated_user,
@@ -218,7 +229,12 @@ results = await retriever.search(
 ```
 
 The lower-level explicit scope API remains available for trees, parallel workers,
-and custom policy flows, but ordinary users should not manage scope algebra.
+and custom policy flows, but ordinary users should not manage scope algebra. A
+host may provide `validate_scope` to recheck revocation before every retrieval
+call, and may set `max_follow_ups` on a root scope when it needs a bounded
+branch. Both controls are optional and disabled by default. A root may also
+carry immutable string `metadata` such as a trace or request ID; metadata is
+propagated unchanged and is never used to grant retrieval authority.
 Underneath, the wrapper targets the ordinary Python retrieval shape: a sync or
 async callable/protocol that accepts `query`, enforced `filters`, and `limit`.
 It preserves the application's document/result model rather than imposing a
@@ -423,9 +439,9 @@ measured corpus and documented model pricing.
 
 | Concern | Choice | Role in Proofline |
 | --- | --- | --- |
-| Compatibility | Python 3.10–3.14 | Target public-library support; Python 3.11+ is recommended. The current reference demonstration remains on Python 3.13 while compatibility work is completed. |
+| Compatibility | Python 3.10–3.14 | Target public-library support; Python 3.11+ is recommended. The reference demonstration remains on Python 3.13. |
 | Integration contract | Python protocol/callable | Wraps a host retriever using `query`, enforced `filters`, and `limit`, without imposing a document model. |
-| Contracts | Standard-library dataclasses/protocols and `typing-extensions` | Typed, 3.10-compatible public contracts without imposing Pydantic on the host application. |
+| Contracts | Standard-library dataclasses and protocols | Typed, 3.10-compatible public contracts without imposing Pydantic on the host application. |
 
 ### Reference demonstration
 

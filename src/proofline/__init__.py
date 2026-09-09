@@ -1,9 +1,42 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
-"""Expose Proofline package metadata without coupling callers to implementation modules.
+"""Capability-attenuating retrieval for permission-preserving multi-hop RAG."""
 
-The package keeps its public identity here so the CLI, evaluation reports, and
-future integrations can report a single versioned project name.
-"""
+from proofline.proposed_step import ProposedRetrievalStep, ProposedStepError
+from proofline.retrieval import (
+    FilteredSearch,
+    ScopedResults,
+    ScopedRetriever,
+    ScopeResolver,
+    ScopeValidationError,
+    ScopeValidator,
+    scoped,
+)
+from proofline.scope import (
+    FilterAtom,
+    RetrievalScope,
+    ScopeError,
+    ScopeExpiredError,
+    ScopeFilters,
+    ScopeMetadata,
+)
 
 __version__ = "0.1.0"
+
+__all__ = [
+    "RetrievalScope",
+    "FilterAtom",
+    "ScopeFilters",
+    "ScopeMetadata",
+    "ScopeError",
+    "ScopeExpiredError",
+    "ScopeValidationError",
+    "ScopeResolver",
+    "ScopeValidator",
+    "FilteredSearch",
+    "ScopedResults",
+    "ScopedRetriever",
+    "ProposedRetrievalStep",
+    "ProposedStepError",
+    "scoped",
+]

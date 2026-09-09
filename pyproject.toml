@@ -19,6 +19,7 @@ build-backend = "hatchling.build"
 dev = [
     "pyright>=1.1.400,<2",
     "pytest>=8.4,<9",
+    "pytest-cov>=6.2,<8",
     "ruff>=0.12,<1",
 ]
 
@@ -30,11 +31,17 @@ line-length = 100
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pyright]
-include = ["src", "tests/core"]
+include = ["src", "tests"]
 pythonVersion = "3.10"
 typeCheckingMode = "standard"
 reportMissingTypeStubs = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests/core"]
-addopts = ["-ra"]
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--cov=proofline",
+    "--cov-branch",
+    "--cov-report=term-missing",
+    "--cov-fail-under=85",
+]

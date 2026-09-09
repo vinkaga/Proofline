@@ -9,8 +9,10 @@ import os
 import pytest
 from typer.testing import CliRunner
 
+from proofline_reference_demo.bounded_host import run_bounded_host
 from proofline_reference_demo.cli import app
 from proofline_reference_demo.domain import Principal
+from proofline_reference_demo.multi_hop import run_clean_two_hop, run_poisoned_two_hop
 from proofline_reference_demo.openfga_fixture import provision_openfga
 from proofline_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
 
@@ -64,6 +66,28 @@ async def test_checked_in_model_enforces_tenant_membership_and_scope() -> None:
             "chunk:acme-rollout",
         }
         assert results.scope.filters["resource_id"] == frozenset({"document:acme-rollout"})
+        clean_trace = await run_clean_two_hop(
+            provisioned.adapter,
+            principal=Principal(id="user:ana"),
+            tenant_id="tenant:acme",
+        )
+        poisoned_trace = await run_poisoned_two_hop(
+            provisioned.adapter,
+            principal=Principal(id="user:ana"),
+            tenant_id="tenant:acme",
+        )
+        assert clean_trace.retrieval_hop_count == 2
+        assert poisoned_trace.retrieval_hop_count == 1
+        assert poisoned_trace.rejected_fields == ("resource_id",)
+        denied_host_trace = await run_bounded_host(
+            provisioned.adapter,
+            principal=Principal(id="user:ana"),
+            tenant_id="tenant:beta",
+            query="Can Ana view the Beta rollout?",
+            resource_id="document:beta-rollout",
+        )
+        assert denied_host_trace.answer == "Access is denied."
+        assert denied_host_trace.tool_calls == ("check_access",)
     finally:
         await provisioned.delete()
 

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from proofline import RetrievalScope, ScopedRetriever, ScopeFilters, scoped
@@ -24,6 +25,9 @@ class DemoRequestContext:
 
 def build_scoped_fixture(
     authorization: AuthorizationAdapter,
+    *,
+    max_follow_ups: int | None = None,
+    on_retrieval: Callable[[str, ScopeFilters], None] | None = None,
 ) -> ScopedRetriever[DemoRequestContext, RetrievalCandidate]:
     """Build a demo retriever that resolves authorization before every search."""
 
@@ -40,6 +44,7 @@ def build_scoped_fixture(
                 "resource_id": list(access_scope.resource_ids),
             },
             policy_version="reference-demo",
+            max_follow_ups=max_follow_ups,
         )
 
     async def search(
@@ -48,6 +53,8 @@ def build_scoped_fixture(
         filters: ScopeFilters,
         limit: int,
     ) -> tuple[RetrievalCandidate, ...]:
+        if on_retrieval is not None:
+            on_retrieval(query, filters)
         tenant_ids = filters.get("tenant_id", frozenset())
         resource_ids = filters.get("resource_id", frozenset())
         permitted_chunks = tuple(

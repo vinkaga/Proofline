@@ -11,6 +11,10 @@ from dataclasses import dataclass
 class ProposedStepError(ValueError):
     """Raised when an untrusted proposed step is not data-only."""
 
+    def __init__(self, message: str, *, fields: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        self.fields = fields
+
 
 @dataclass(frozen=True, slots=True)
 class ProposedRetrievalStep:
@@ -25,7 +29,7 @@ class ProposedRetrievalStep:
     parent_step_id: str | None = None
 
     @classmethod
-    def from_untrusted(cls, value: Mapping[object, object]) -> ProposedRetrievalStep:
+    def from_untrusted(cls, value: Mapping[str, object]) -> ProposedRetrievalStep:
         """Parse an external proposal, rejecting every non-data field.
 
         Call this at the boundary where model or retrieved-document output is
@@ -39,8 +43,14 @@ class ProposedRetrievalStep:
             field for field in value if not isinstance(field, str) or field not in allowed_fields
         ]
         if unexpected:
-            fields = ", ".join(sorted(repr(field) for field in unexpected))
-            raise ProposedStepError(f"proposed step contains forbidden fields: {fields}")
+            rejected_fields = tuple(
+                sorted(field if isinstance(field, str) else repr(field) for field in unexpected)
+            )
+            fields = ", ".join(rejected_fields)
+            raise ProposedStepError(
+                f"proposed step contains forbidden fields: {fields}",
+                fields=rejected_fields,
+            )
 
         query = value.get("query")
         if not isinstance(query, str) or not query.strip():

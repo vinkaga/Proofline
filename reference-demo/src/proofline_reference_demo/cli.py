@@ -17,7 +17,7 @@ from typing import Annotated
 import typer
 from qdrant_client import QdrantClient
 
-from proofline_reference_demo.authorization import StaticAuthorizationAdapter
+from proofline_reference_demo.authorization import AuthorizationAdapter, StaticAuthorizationAdapter
 from proofline_reference_demo.corpus import (
     build_corpus,
     load_access_assignments,
@@ -32,7 +32,7 @@ from proofline_reference_demo.dense_retrieval import (
     TokenHashEmbeddingProvider,
     write_dense_comparison_report,
 )
-from proofline_reference_demo.domain import Principal
+from proofline_reference_demo.domain import AccessScope, Principal, ScopedResource
 from proofline_reference_demo.evaluation_data import load_evaluation_suite
 from proofline_reference_demo.hybrid_retrieval import HybridRrfRetriever
 from proofline_reference_demo.lexical_evaluation import (
@@ -45,8 +45,8 @@ from proofline_reference_demo.openfga_fixture import load_static_permissions, pr
 from proofline_reference_demo.reranking import RerankingRetriever, TokenCoverageReranker
 from proofline_reference_demo.retrieval import AccessGatedBm25Retriever, RetrievalResult
 from proofline_reference_demo.retrieval_comparison import write_method_comparison_report
+from proofline_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
 from proofline_reference_demo.tracing import trace_tenant_retrieval
-from proofline_reference_demo.vertical_slice import build_vertical_slice
 
 app = typer.Typer(
     name="proofline-reference-demo",
@@ -102,8 +102,11 @@ def demo_tenant_search(
 
     caller = Principal(id=principal)
     if authorization == "static":
-        retriever = build_vertical_slice()
-        result = asyncio.run(retriever.search_tenant(caller, tenant, query))
+        result = asyncio.run(
+            _search_through_proofline(
+                StaticAuthorizationAdapter(load_static_permissions()), caller, tenant, query
+            )
+        )
     elif authorization == "openfga":
         server_url = os.environ.get("OPENFGA_URL")
         if not server_url:
@@ -274,9 +277,39 @@ async def _search_with_openfga(
 
     provisioned = await provision_openfga(server_url)
     try:
-        return await build_vertical_slice(provisioned.adapter).search_tenant(caller, tenant, query)
+        return await _search_through_proofline(provisioned.adapter, caller, tenant, query)
     finally:
         await provisioned.delete()
+
+
+async def _search_through_proofline(
+    authorization: AuthorizationAdapter,
+    caller: Principal,
+    tenant: str,
+    query: str,
+) -> RetrievalResult:
+    """Run the fixture through the published scoped-retrieval boundary."""
+
+    results = await build_scoped_fixture(authorization).search(
+        query,
+        context=DemoRequestContext(principal=caller, tenant_id=tenant),
+    )
+    resource_ids = results.scope.filters["resource_id"]
+    typed_resource_ids = tuple(
+        resource_id for resource_id in resource_ids if isinstance(resource_id, str)
+    )
+    if len(typed_resource_ids) != len(resource_ids):
+        raise TypeError("reference-demo resource IDs must be strings")
+    return RetrievalResult(
+        access_scope=AccessScope(
+            tenant_id=tenant,
+            resources=tuple(
+                ScopedResource(tenant_id=tenant, resource_id=resource_id)
+                for resource_id in sorted(typed_resource_ids)
+            ),
+        ),
+        candidates=results.items,
+    )
 
 
 async def _check_access_with_openfga(

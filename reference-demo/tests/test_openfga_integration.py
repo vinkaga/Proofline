@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from proofline_reference_demo.cli import app
 from proofline_reference_demo.domain import Principal
 from proofline_reference_demo.openfga_fixture import provision_openfga
-from proofline_reference_demo.vertical_slice import build_vertical_slice
+from proofline_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
 
 OPENFGA_URL = os.environ.get("OPENFGA_URL")
 runner = CliRunner()
@@ -53,13 +53,17 @@ async def test_checked_in_model_enforces_tenant_membership_and_scope() -> None:
         assert not await provisioned.adapter.check_access(
             Principal(id="user:carla"), "viewer", "document:acme-secret", "tenant:beta"
         )
-        result = await build_vertical_slice(provisioned.adapter).search_tenant(
-            Principal(id="user:ana"), "tenant:acme", "release approval incident"
+        results = await build_scoped_fixture(provisioned.adapter).search(
+            "release approval incident",
+            context=DemoRequestContext(
+                principal=Principal(id="user:ana"), tenant_id="tenant:acme"
+            ),
         )
-        assert {candidate.chunk_id for candidate in result.candidates} == {
+        assert {candidate.chunk_id for candidate in results.items} == {
             "chunk:public-policy",
             "chunk:acme-rollout",
         }
+        assert results.scope.filters["resource_id"] == frozenset({"document:acme-rollout"})
     finally:
         await provisioned.delete()
 

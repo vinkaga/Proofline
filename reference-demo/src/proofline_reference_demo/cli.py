@@ -37,8 +37,10 @@ from proofline_reference_demo.domain import AccessScope, Principal, ScopedResour
 from proofline_reference_demo.evaluation_data import load_evaluation_suite
 from proofline_reference_demo.hotpot_evaluation import (
     evaluate_hotpotqa_retrieval,
+    evaluate_hotpotqa_scope_controls,
     evaluate_hotpotqa_scope_overlay,
     validate_hotpotqa_evaluation,
+    validate_hotpotqa_scope_controls,
     validate_hotpotqa_scope_overlay,
 )
 from proofline_reference_demo.hotpotqa import (
@@ -441,14 +443,16 @@ def evaluate_hotpotqa(
     overlay = evaluate_overlay(cases, build_overlay(cases), benchmark.source.sha256)
     report = evaluate_hotpotqa_retrieval(cases, overlay)
     scope_traces = asyncio.run(evaluate_hotpotqa_scope_overlay(cases, build_overlay(cases)))
+    controls = evaluate_hotpotqa_scope_controls(scope_traces)
     typer.echo(
         json.dumps(
             {
                 "retrieval": asdict(report),
                 "scope_overlay": {
                     "trace_count": len(scope_traces),
-                    "access_isolation_passed": True,
-                    "poison_rejection_passed": True,
+                    "configurations": [
+                        asdict(configuration) for configuration in controls.configurations
+                    ],
                 },
             },
             indent=2,
@@ -457,6 +461,7 @@ def evaluate_hotpotqa(
     try:
         validate_hotpotqa_evaluation(report)
         validate_hotpotqa_scope_overlay(scope_traces)
+        validate_hotpotqa_scope_controls(controls)
     except ValueError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error

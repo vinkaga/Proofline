@@ -4,7 +4,7 @@
 
 | Field | Value |
 | --- | --- |
-| Code base | `767ca8e592ba0ce06c7a16e4d36dc8203e2c1d31` plus uncommitted Phase 7 benchmark changes |
+| Benchmark manifest | `data/benchmarks/hotpotqa-distractor-dev.yaml` (`hotpotqa-distractor-dev-v1`) |
 | Dataset | HotpotQA distractor development set |
 | Dataset SHA-256 | `e3da074df24e8369009918aa5cdbdd254dadcde4c63f7569d36afd6f2268caa8` |
 | License | CC BY-SA 4.0 |
@@ -24,19 +24,36 @@
 | Scope-bearing poisoned-proposal rejection | 1.000 |
 | Benign data-only proposal acceptance | 1.000 |
 
+## Control comparison
+
+The source questions and contexts are identical across controls. The ACL labels
+and the scope-bearing proposal are synthetic overlay data. The intentionally
+insecure control is a test control: it treats the proposal's protected
+`resource_id` as an effective retrieval selector. It establishes that the
+fixture can expose protected evidence; it is not a deployable baseline.
+
+| Control | Accepts scope-bearing input | Protected-evidence exposure | Rejects before retrieval | Complete child-scope lineage |
+| --- | ---: | ---: | ---: | ---: |
+| Insecure baseline | 1.000 | 1.000 | 0.000 | 0.000 |
+| ACL-filtered per hop | 1.000 | 0.000 | 0.000 | 0.000 |
+| Proofline scoped-plan policy | 0.000 | 0.000 | 1.000 | 1.000 |
+
 ## Interpretation
 
 The retrieval result is a transparent lexical baseline, not an answer-quality
 claim: 34 of 50 questions retrieved all gold supporting titles in the top five;
 the other 16 missed at least one title. The ACL/poison overlay is evaluated
-separately from the benchmark's source data. Each case runs through actual
-ACL-filtered retrieval: all returned resources must be in the caller's allowed
-set, the protected resource must not be returned, a scope-bearing proposal must
-be rejected, and a data-only proposal remains allowed.
+separately from the benchmark's source data. ACL filtering alone prevents
+exposure after an unsafe planner input has been accepted. Proofline adds the
+narrower property that the scope-bearing proposal is rejected before it can
+produce a second retrieval; ordinary data-only follow-up retains its
+child-scope lineage.
 
 Run the evaluation with:
 
 ```bash
+curl --fail --location --output hotpot_dev_distractor_v1.json \
+  https://huggingface.co/datasets/namlh2004/hotpotqa/resolve/7e54db4656209750ff487f6fdf8e39a66dba136b/hotpot_dev_distractor_v1.json
 cd reference-demo
 uv run proofline-reference-demo evaluate-hotpotqa \
   --dataset ../hotpot_dev_distractor_v1.json

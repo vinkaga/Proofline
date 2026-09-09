@@ -25,6 +25,18 @@ jobs:
       - run: uv run pyright
       - run: uv run pytest
       - run: uv run proofline-reference-demo evaluate
+      - name: Download verified HotpotQA distractor development set
+        run: |
+          for url in \
+            'https://huggingface.co/datasets/namlh2004/hotpotqa/resolve/7e54db4656209750ff487f6fdf8e39a66dba136b/hotpot_dev_distractor_v1.json' \
+            'https://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_distractor_v1.json'; do
+            if curl --fail --location --retry 2 --connect-timeout 10 --max-time 90 \
+              --output ../hotpot_dev_distractor_v1.json "$url"; then
+              exit 0
+            fi
+          done
+          exit 1
+      - run: uv run proofline-reference-demo evaluate-hotpotqa
       - run: docker compose up -d openfga
       - run: until curl --fail --silent http://localhost:8080/healthz; do sleep 1; done
       - run: OPENFGA_URL=http://localhost:8080 uv run pytest -m integration --no-cov

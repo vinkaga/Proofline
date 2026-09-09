@@ -117,13 +117,18 @@ or security.
 4. **A deterministic multi-hop fixture.** A clean two-hop path preserves its
    inherited scope; a synthetic scope-bearing planner proposal is rejected
    before it can trigger a follow-up retrieval.
-5. **A bounded reference host.** Deterministic request routing uses a
+5. **A public-data scope-propagation benchmark.** A pinned 50-case HotpotQA
+   distractor-dev subset measures lexical evidence retrieval and applies a
+   separate synthetic ACL/poison overlay across insecure, ACL-per-hop, and
+   scoped-plan-policy controls. The checked-in
+   [result report](reference-demo/benchmark-results/hotpotqa-distractor-dev-v1/bm25-k5-scope-overlay-v1.md)
+   records the measured outcome.
+6. **A bounded reference host.** Deterministic request routing uses a
    context-bound MCP permission tool or scoped retrieval, then returns a cited
    evidence response or an explicit abstention.
 
-The larger adversarial multi-hop evaluation, framework examples, and comparison
-of insecure versus scope-preserving planners remain planned work. They are not
-claimed as current capabilities.
+Framework interoperability examples and optional OpenTelemetry/Phoenix tracing
+remain planned work. They are not claimed as current capabilities.
 
 ## Repository layout
 
@@ -353,12 +358,31 @@ interpret.
 
 ## Reference-demo evaluation
 
-The checked-in release suite currently contains 50 hand-authored, versioned
-retrieval and permission cases. A separate deterministic scope-propagation gate
-compares clean, benign, and poisoned multi-hop counterparts across three
-controls: an intentionally insecure baseline, ACL filtering on every hop, and
-Proofline's scoped plan policy. It is deliberately small; expanding it to a
-larger public-data adversarial suite is planned work, not a current claim.
+The checked-in release suite contains 50 hand-authored, versioned retrieval and
+permission cases. A separate deterministic scope-propagation gate compares
+clean, benign, and poisoned multi-hop counterparts across three controls: an
+intentionally insecure baseline, ACL filtering on every hop, and Proofline's
+scoped plan policy.
+
+The broader public-data gate uses the pinned 50-case HotpotQA distractor-dev
+bridge-question subset. It measures BM25 retrieval against HotpotQA's supplied
+supporting-title labels, then applies a synthetic ACL and scope-bearing-plan
+overlay without modifying the questions or passages. It is not an answer
+accuracy or universal poisoning claim. The
+[versioned result report](reference-demo/benchmark-results/hotpotqa-distractor-dev-v1/bm25-k5-scope-overlay-v1.md)
+records its exact data hash, configuration, and control comparison.
+
+To reproduce the public-data gate locally, download the artifact named by its
+manifest, then run the evaluator; it verifies the recorded SHA-256 before
+parsing the file:
+
+```bash
+curl --fail --location --output hotpot_dev_distractor_v1.json \
+  https://huggingface.co/datasets/namlh2004/hotpotqa/resolve/7e54db4656209750ff487f6fdf8e39a66dba136b/hotpot_dev_distractor_v1.json
+cd reference-demo
+uv run proofline-reference-demo evaluate-hotpotqa \
+  --dataset ../hotpot_dev_distractor_v1.json
+```
 
 | Evaluation layer | What it checks | Primary measure |
 | --- | --- | --- |

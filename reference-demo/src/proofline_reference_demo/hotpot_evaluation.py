@@ -4,12 +4,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
-from proofline import ProposedRetrievalStep, ProposedStepError
+from proofline import ProposedRetrievalStep, ProposedStepError, RetrievalScope, scoped
+from proofline.scope import ScopeFilters
 
 from proofline_reference_demo.authorization import StaticAuthorizationAdapter
-from proofline_reference_demo.domain import Principal, ScopedResource
+from proofline_reference_demo.domain import Principal, RetrievalCandidate, ScopedResource
 from proofline_reference_demo.hotpotqa import HotpotCase, HotpotOverlayReport, OverlayCase
 from proofline_reference_demo.retrieval import AccessGatedBm25Retriever, DocumentChunk
 
@@ -39,13 +41,39 @@ class HotpotEvaluationReport:
 
 @dataclass(frozen=True, slots=True)
 class HotpotScopeTrace:
-    """One actual ACL-overlay retrieval trace, excluding passage contents."""
+    """One three-control overlay trace, excluding source passage contents."""
 
     case_id: str
     allowed_resource_ids: tuple[str, ...]
     candidate_resource_ids: tuple[str, ...]
+    benign_follow_up_resource_ids: tuple[str, ...]
+    acl_only_follow_up_resource_ids: tuple[str, ...]
+    insecure_follow_up_resource_ids: tuple[str, ...]
     protected_resource_id: str
     poisoned_proposal_rejected: bool
+    scoped_poison_follow_up_attempted: bool
+    scope_lineage_complete: bool
+
+
+@dataclass(frozen=True, slots=True)
+class HotpotControlConfiguration:
+    """Aggregate behavior for one control over the public benchmark subset."""
+
+    name: str
+    case_count: int
+    clean_evidence_available_rate: float
+    benign_follow_up_acceptance_rate: float
+    scope_bearing_input_acceptance_rate: float
+    unauthorized_exposure_rate: float
+    rejected_before_retrieval_rate: float
+    scope_lineage_complete_rate: float
+
+
+@dataclass(frozen=True, slots=True)
+class HotpotScopeControlReport:
+    """Three-control comparison for the synthetic authority overlay."""
+
+    configurations: tuple[HotpotControlConfiguration, ...]
 
 
 async def evaluate_hotpotqa_scope_overlay(
@@ -54,7 +82,14 @@ async def evaluate_hotpotqa_scope_overlay(
     *,
     limit: int = 5,
 ) -> tuple[HotpotScopeTrace, ...]:
-    """Run each HotpotQA context set through actual tenant ACL filtering."""
+    """Evaluate insecure, ACL-only, and scoped controls for every public case.
+
+    The HotpotQA questions and contexts remain unmodified. Tenant labels and
+    the scope-bearing proposal are synthetic overlay data. The insecure
+    control deliberately treats a proposal's ``resource_id`` as an effective
+    selector; the ACL-only control accepts it but independently resolves the
+    caller's ACL; the scoped control rejects it before a second retrieval.
+    """
 
     if len(cases) != len(overlays):
         raise ValueError("HotpotQA cases and overlays must have equal length")
@@ -84,8 +119,20 @@ async def evaluate_hotpotqa_scope_overlay(
                 )
             }
         )
-        result = await AccessGatedBm25Retriever(chunks, authorization).search_tenant(
-            Principal(id="user:benchmark"), "tenant:acme", case.question, limit
+        caller = Principal(id="user:benchmark")
+        acl_retriever = AccessGatedBm25Retriever(chunks, authorization)
+        acl_only_follow_up = await acl_retriever.search_tenant(
+            caller, "tenant:acme", str(overlay.poisoned_proposal["query"]), limit
+        )
+
+        retriever = scoped(_backend_for_chunks(chunks), resolve_scope=_resolve_scope)
+        initial = await retriever.search(
+            case.question, context=(authorization, caller), limit=limit
+        )
+        benign = await retriever.follow_proposed(
+            initial,
+            ProposedRetrievalStep.from_untrusted(overlay.benign_proposal),
+            limit=limit,
         )
         try:
             ProposedRetrievalStep.from_untrusted(overlay.poisoned_proposal)
@@ -97,12 +144,112 @@ async def evaluate_hotpotqa_scope_overlay(
             HotpotScopeTrace(
                 case.case_id,
                 overlay.allowed_resource_ids,
-                tuple(candidate.resource_id for candidate in result.candidates),
+                tuple(candidate.resource_id for candidate in initial.items),
+                tuple(candidate.resource_id for candidate in benign.items),
+                tuple(candidate.resource_id for candidate in acl_only_follow_up.candidates),
+                (overlay.protected_resource_id,),
                 overlay.protected_resource_id,
                 rejected,
+                False,
+                benign.scope.parent_scope_id == initial.scope.scope_id,
             )
         )
     return tuple(traces)
+
+
+async def _resolve_scope(
+    context: tuple[StaticAuthorizationAdapter, Principal],
+) -> RetrievalScope:
+    """Derive a root scope only from the synthetic authorization adapter."""
+
+    authorization, caller = context
+    access_scope = await authorization.list_permitted_resources(caller, "tenant:acme")
+    return RetrievalScope.root(
+        principal=caller.id,
+        filters={"resource_id": access_scope.resource_ids},
+        max_follow_ups=1,
+        policy_version="hotpotqa-overlay-v1",
+    )
+
+
+def _backend_for_chunks(
+    chunks: tuple[DocumentChunk, ...],
+) -> Callable[..., tuple[RetrievalCandidate, ...]]:
+    """Return the host's ordinary filtered-search callable for one case."""
+
+    def backend(query: str, *, filters: ScopeFilters, limit: int) -> tuple[RetrievalCandidate, ...]:
+        resource_ids = filters.get("resource_id", frozenset())
+        if not all(isinstance(resource_id, str) for resource_id in resource_ids):
+            raise TypeError("HotpotQA resource IDs must be strings")
+        permitted = tuple(chunk for chunk in chunks if chunk.resource_id in resource_ids)
+        return AccessGatedBm25Retriever._rank(query, permitted, limit)
+
+    return backend
+
+
+def evaluate_hotpotqa_scope_controls(
+    traces: tuple[HotpotScopeTrace, ...],
+) -> HotpotScopeControlReport:
+    """Aggregate the three controls without treating utility as answer accuracy."""
+
+    if not traces:
+        raise ValueError("HotpotQA scope overlay produced no traces")
+    count = len(traces)
+
+    def rate(predicate: Callable[[HotpotScopeTrace], object]) -> float:
+        return sum(bool(predicate(trace)) for trace in traces) / count
+
+    return HotpotScopeControlReport(
+        configurations=(
+            HotpotControlConfiguration(
+                name="insecure-baseline",
+                case_count=count,
+                clean_evidence_available_rate=rate(lambda trace: trace.allowed_resource_ids),
+                benign_follow_up_acceptance_rate=1.0,
+                scope_bearing_input_acceptance_rate=1.0,
+                unauthorized_exposure_rate=rate(
+                    lambda trace: (
+                        trace.protected_resource_id in trace.insecure_follow_up_resource_ids
+                    )
+                ),
+                rejected_before_retrieval_rate=0.0,
+                scope_lineage_complete_rate=0.0,
+            ),
+            HotpotControlConfiguration(
+                name="acl-filtered-per-hop",
+                case_count=count,
+                clean_evidence_available_rate=rate(lambda trace: trace.allowed_resource_ids),
+                benign_follow_up_acceptance_rate=1.0,
+                scope_bearing_input_acceptance_rate=1.0,
+                unauthorized_exposure_rate=rate(
+                    lambda trace: (
+                        trace.protected_resource_id in trace.acl_only_follow_up_resource_ids
+                    )
+                ),
+                rejected_before_retrieval_rate=0.0,
+                scope_lineage_complete_rate=0.0,
+            ),
+            HotpotControlConfiguration(
+                name="scoped-plan-policy",
+                case_count=count,
+                clean_evidence_available_rate=rate(lambda trace: trace.allowed_resource_ids),
+                benign_follow_up_acceptance_rate=1,
+                scope_bearing_input_acceptance_rate=rate(
+                    lambda trace: not trace.poisoned_proposal_rejected
+                ),
+                unauthorized_exposure_rate=rate(
+                    lambda trace: trace.protected_resource_id in trace.candidate_resource_ids
+                ),
+                rejected_before_retrieval_rate=rate(
+                    lambda trace: (
+                        trace.poisoned_proposal_rejected
+                        and not trace.scoped_poison_follow_up_attempted
+                    )
+                ),
+                scope_lineage_complete_rate=rate(lambda trace: trace.scope_lineage_complete),
+            ),
+        )
+    )
 
 
 def evaluate_hotpotqa_retrieval(
@@ -191,3 +338,23 @@ def validate_hotpotqa_scope_overlay(traces: tuple[HotpotScopeTrace, ...]) -> Non
             )
         if not trace.poisoned_proposal_rejected:
             raise ValueError(f"HotpotQA scope overlay accepted poison in {trace.case_id}")
+
+
+def validate_hotpotqa_scope_controls(report: HotpotScopeControlReport) -> None:
+    """Block CI when a control no longer demonstrates the claimed boundary."""
+
+    insecure, acl_only, scoped_policy = report.configurations
+    if insecure.unauthorized_exposure_rate != 1:
+        raise ValueError("HotpotQA insecure control did not expose protected evidence")
+    if acl_only.unauthorized_exposure_rate != 0:
+        raise ValueError("HotpotQA ACL-only control exposed protected evidence")
+    if acl_only.scope_bearing_input_acceptance_rate != 1:
+        raise ValueError("HotpotQA ACL-only control did not accept scope-bearing input")
+    if scoped_policy.scope_bearing_input_acceptance_rate != 0:
+        raise ValueError("HotpotQA scoped policy accepted scope-bearing input")
+    if scoped_policy.rejected_before_retrieval_rate != 1:
+        raise ValueError("HotpotQA scoped policy did not reject before retrieval")
+    if scoped_policy.unauthorized_exposure_rate != 0:
+        raise ValueError("HotpotQA scoped policy exposed protected evidence")
+    if scoped_policy.scope_lineage_complete_rate != 1:
+        raise ValueError("HotpotQA scoped policy lost child-scope lineage")

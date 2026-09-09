@@ -9,6 +9,9 @@ source:
   license: CC-BY-SA-4.0
   citation: Yang et al., EMNLP 2018
   sha256: e3da074df24e8369009918aa5cdbdd254dadcde4c63f7569d36afd6f2268caa8
+  mirrors:
+    # Immutable mirror. Its commit and the evaluator's SHA-256 check pin the bytes.
+    - https://huggingface.co/datasets/namlh2004/hotpotqa/resolve/7e54db4656209750ff487f6fdf8e39a66dba136b/hotpot_dev_distractor_v1.json
 subset:
   size: 50
   selection: first 50 bridge questions after sorting by _id

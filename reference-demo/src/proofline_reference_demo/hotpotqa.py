@@ -22,6 +22,7 @@ class HotpotSource(BaseModel):
     license: str
     citation: str
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    mirrors: tuple[str, ...] = ()
 
 
 class HotpotSubset(BaseModel):

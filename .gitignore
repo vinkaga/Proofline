@@ -20,3 +20,6 @@ __pycache__/
 artifacts/
 reports/
 .coverage
+
+# Downloaded third-party benchmark data; source and SHA-256 live in data/benchmarks.
+hotpot_dev_distractor_v1.json

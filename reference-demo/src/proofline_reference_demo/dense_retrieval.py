@@ -238,9 +238,7 @@ class OpenAiEmbeddingProvider:
             ):
                 raise RuntimeError("OpenAI embeddings response contained an invalid vector")
             entries.append((item["index"], [float(value) for value in embedding]))
-        vectors = tuple(
-            tuple(embedding) for _, embedding in sorted(entries)
-        )
+        vectors = tuple(tuple(embedding) for _, embedding in sorted(entries))
         dimensions = _validate_vectors(vectors, len(texts))
         if self._dimensions is not None and self._dimensions != dimensions:
             raise RuntimeError("OpenAI embedding dimensions changed between calls")

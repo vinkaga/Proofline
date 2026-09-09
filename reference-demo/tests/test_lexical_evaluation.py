@@ -56,9 +56,7 @@ def lexical_retriever() -> AccessGatedBm25Retriever:
         StaticAuthorizationAdapter(
             {
                 ("user:ana", "tenant:acme"): (
-                    ScopedResource(
-                        tenant_id="tenant:acme", resource_id="document:acme-rollout"
-                    ),
+                    ScopedResource(tenant_id="tenant:acme", resource_id="document:acme-rollout"),
                 )
             }
         ),
@@ -115,9 +113,7 @@ def suite() -> EvaluationSuite:
 async def test_evaluation_reports_ranking_latency_and_zero_exposure(
     lexical_retriever: AccessGatedBm25Retriever, suite: EvaluationSuite, tmp_path
 ) -> None:
-    measurement = await evaluate_lexical_baseline(
-        lexical_retriever, suite, "corpus-test", limit=5
-    )
+    measurement = await evaluate_lexical_baseline(lexical_retriever, suite, "corpus-test", limit=5)
 
     assert measurement.retrieval_case_count == 2
     assert measurement.recall_at_k == 1

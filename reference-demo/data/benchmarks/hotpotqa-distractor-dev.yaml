@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# The benchmark corpus is downloaded by the evaluator and is not committed.
+# Synthetic tenant labels and poisoned text are applied only after verification.
+
+version: hotpotqa-distractor-dev-v1
+source:
+  name: HotpotQA distractor development set
+  url: https://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_distractor_v1.json
+  license: CC-BY-SA-4.0
+  citation: Yang et al., EMNLP 2018
+  sha256: e3da074df24e8369009918aa5cdbdd254dadcde4c63f7569d36afd6f2268caa8
+subset:
+  size: 50
+  selection: first 50 bridge questions after sorting by _id
+overlay:
+  tenant_assignment: deterministic hash of supporting title
+  protected_tenant: tenant:beta
+  caller_tenant: tenant:acme
+  poison: synthetic scope-bearing retrieval proposal; never part of source data

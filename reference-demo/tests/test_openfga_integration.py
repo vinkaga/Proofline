@@ -57,9 +57,7 @@ async def test_checked_in_model_enforces_tenant_membership_and_scope() -> None:
         )
         results = await build_scoped_fixture(provisioned.adapter).search(
             "release approval incident",
-            context=DemoRequestContext(
-                principal=Principal(id="user:ana"), tenant_id="tenant:acme"
-            ),
+            context=DemoRequestContext(principal=Principal(id="user:ana"), tenant_id="tenant:acme"),
         )
         assert {candidate.chunk_id for candidate in results.items} == {
             "chunk:public-policy",

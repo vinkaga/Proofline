@@ -68,8 +68,7 @@ def write_method_comparison_report(
 def _hits(measurement: LexicalBaselineMeasurement) -> dict[str, bool]:
     return {
         case.case_id: bool(
-            case.relevant_identifiers
-            & {identifier for _, identifier in case.ranked_identifiers}
+            case.relevant_identifiers & {identifier for _, identifier in case.ranked_identifiers}
         )
         for case in measurement.cases
         if case.relevant_identifiers

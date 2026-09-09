@@ -26,7 +26,11 @@ class StaticRetriever:
         return self._result
 
     async def search_tenant(
-        self, principal: Principal, tenant_id: str, query: str, limit: int = 5  # noqa: ARG002
+        self,
+        principal: Principal,
+        tenant_id: str,
+        query: str,
+        limit: int = 5,  # noqa: ARG002
     ) -> RetrievalResult:
         return self._result
 

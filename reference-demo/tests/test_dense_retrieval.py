@@ -288,8 +288,7 @@ def test_openai_embedding_provider_batches_documents_and_explains_api_errors(
             return json.dumps(
                 {
                     "data": [
-                        {"index": index, "embedding": [1.0, 2.0]}
-                        for index in range(self._count)
+                        {"index": index, "embedding": [1.0, 2.0]} for index in range(self._count)
                     ],
                     "usage": {"total_tokens": self._count},
                 }

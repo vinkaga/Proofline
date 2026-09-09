@@ -42,9 +42,7 @@ def build_permission_server(
         relation: str,
         resource_id: str,
     ) -> CheckAccessResult:
-        allowed = await authorization.check_access(
-            principal, relation, resource_id, tenant_id
-        )
+        allowed = await authorization.check_access(principal, relation, resource_id, tenant_id)
         return CheckAccessResult(allowed=allowed)
 
     return server

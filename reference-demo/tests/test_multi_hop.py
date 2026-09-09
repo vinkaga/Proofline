@@ -5,7 +5,11 @@ import asyncio
 
 from proofline_reference_demo.authorization import StaticAuthorizationAdapter
 from proofline_reference_demo.domain import Principal, ScopedResource
-from proofline_reference_demo.multi_hop import run_clean_two_hop, run_poisoned_two_hop
+from proofline_reference_demo.multi_hop import (
+    run_benign_two_hop,
+    run_clean_two_hop,
+    run_poisoned_two_hop,
+)
 
 
 def _authorization() -> StaticAuthorizationAdapter:
@@ -52,3 +56,17 @@ def test_poisoned_two_hop_is_rejected_before_follow_up_retrieval() -> None:
     assert len(trace.scopes) == 1
     assert trace.proposal_source_chunk_id == "chunk:acme-rollout"
     assert trace.rejected_fields == ("resource_id",)
+
+
+def test_benign_security_discussion_can_propose_a_data_only_follow_up() -> None:
+    trace = asyncio.run(
+        run_benign_two_hop(
+            _authorization(), principal=Principal(id="user:ana"), tenant_id="tenant:acme"
+        )
+    )
+
+    assert trace.scenario == "benign"
+    assert trace.proposal_source_chunk_id == "chunk:public-security-guidance"
+    assert "chunk:public-security-guidance" in trace.initial_candidate_ids
+    assert "chunk:public-policy" in trace.follow_up_candidate_ids
+    assert trace.retrieval_hop_count == 2

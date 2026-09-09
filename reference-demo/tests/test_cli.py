@@ -17,11 +17,20 @@ from proofline_reference_demo.domain import ScopedResource
 runner = CliRunner()
 
 
-def test_future_commands_are_explicitly_unavailable() -> None:
+def test_evaluate_runs_the_scope_propagation_release_gate() -> None:
     result = runner.invoke(cli.app, ["evaluate"])
 
+    assert result.exit_code == 0
+    report = json.loads(result.stdout)
+    assert report["passed"] is True
+    assert report["configurations"][0]["unauthorized_exposure"] is True
+
+
+def test_future_report_command_is_explicitly_unavailable() -> None:
+    result = runner.invoke(cli.app, ["report"])
+
     assert result.exit_code == 2
-    assert "planned for Phase 7" in result.stdout
+    assert "planned for Phase 8" in result.stdout
 
 
 def test_ingest_writes_a_corpus_from_a_pinned_manifest(tmp_path) -> None:
@@ -269,6 +278,7 @@ def test_demo_tenant_search_prints_only_allowed_trace_candidates() -> None:
     ]
     assert {candidate["chunk_id"] for candidate in trace["candidates"]} == {
         "chunk:public-policy",
+        "chunk:public-security-guidance",
         "chunk:acme-rollout",
     }
 
@@ -316,6 +326,7 @@ def test_demo_tenant_search_uses_provisioned_openfga_adapter(monkeypatch) -> Non
     assert result.exit_code == 0
     assert {candidate["chunk_id"] for candidate in json.loads(result.stdout)["candidates"]} == {
         "chunk:public-policy",
+        "chunk:public-security-guidance",
         "chunk:acme-rollout",
     }
     provision.assert_awaited_once_with("http://openfga.test")

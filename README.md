@@ -351,12 +351,12 @@ interpret.
 
 ## Reference-demo evaluation
 
-The evaluation set has three tiers. The release suite contains roughly 50 to 75
-hand-authored, versioned cases that gate changes. An adversarial suite adds
-cross-tenant, partial-access, identifier-guessing, instruction-like
-existence-inference probes. A later expansion set adds held-out, realistically
-authored questions. Generated cases may add stress coverage but are not the
-quality source of truth.
+The checked-in release suite currently contains 25 hand-authored, versioned
+retrieval and permission cases. A separate deterministic scope-propagation gate
+compares clean, benign, and poisoned multi-hop counterparts across three
+controls: an intentionally insecure baseline, ACL filtering on every hop, and
+Proofline's scoped plan policy. It is deliberately small; expanding it to a
+larger public-data adversarial suite is planned work, not a current claim.
 
 | Evaluation layer | What it checks | Primary measure |
 | --- | --- | --- |
@@ -505,6 +505,16 @@ uv run proofline-reference-demo demo-multi-hop --scenario poisoned
 
 The poisoned fixture is a deterministic test of the planner-input boundary; it
 does not claim to detect arbitrary prompt injection or document poisoning.
+
+Run the CI-friendly scope-propagation release gate:
+
+```bash
+uv run proofline-reference-demo evaluate
+```
+
+It exits nonzero if the scoped configuration accepts a scope-bearing planner
+input, exposes unauthorized evidence, loses clean or benign follow-up behavior,
+exceeds the rejected-step budget, or records incomplete scope lineage.
 
 Run the bounded reference host with a tenant-knowledge or permission request:
 

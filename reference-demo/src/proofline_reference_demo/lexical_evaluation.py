@@ -136,8 +136,10 @@ def _relevant_identifiers(case: EvaluationCaseSpec) -> frozenset[str]:
     if case.expected is not ExpectedOutcome.CITED_ANSWER:
         return frozenset()
     return frozenset(
-        [*(f"source:{source}" for source in case.required_sources),
-         *(f"resource:{resource}" for resource in case.required_resources)]
+        [
+            *(f"source:{source}" for source in case.required_sources),
+            *(f"resource:{resource}" for resource in case.required_resources),
+        ]
     )
 
 
@@ -237,8 +239,7 @@ def _ndcg(case: CaseMeasurement, limit: int) -> float:
         if identifier in case.relevant_identifiers
     ]
     ideal = sum(
-        1 / _log2(rank + 1)
-        for rank in range(1, min(len(case.relevant_identifiers), limit) + 1)
+        1 / _log2(rank + 1) for rank in range(1, min(len(case.relevant_identifiers), limit) + 1)
     )
     return sum(gains) / ideal if ideal else 0.0
 
@@ -297,20 +298,20 @@ def write_lexical_report(measurement: LexicalBaselineMeasurement, output: Path) 
     lines.extend(f"- `{case_id}`" for case_id in failures[:10])
     if not failures:
         lines.append("- None")
-    lines.extend([
-        "",
-        "## Access-boundary checks",
-        "",
-        (
-            "All public results must be public. Tenant results may contain public chunks plus only "
-            "resources in the resolved tenant scope. Any violation is included in the exposure "
-            "metric above."
-        ),
-        "",
-    ])
-    reviewed_probes = tuple(
-        case for case in measurement.cases if "access_isolation" in case.tags
+    lines.extend(
+        [
+            "",
+            "## Access-boundary checks",
+            "",
+            (
+                "All public results must be public. Tenant results may contain public chunks "
+                "plus only resources in the resolved tenant scope. Any violation is included "
+                "in the exposure metric above."
+            ),
+            "",
+        ]
     )
+    reviewed_probes = tuple(case for case in measurement.cases if "access_isolation" in case.tags)
     lines.extend(["## Access-isolation failure-mode analysis", ""])
     lines.extend(
         (

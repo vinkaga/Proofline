@@ -13,8 +13,9 @@ from proofline_reference_demo.evaluation_data import EvaluationSuite, load_evalu
 def test_release_suite_is_typed_and_unique() -> None:
     suite = load_evaluation_suite(Path("data/eval/release-v0.yaml"))
 
-    assert len(suite.cases) == 25
-    assert len({case.id for case in suite.cases}) == 25
+    assert suite.version == "release-v1"
+    assert len(suite.cases) == 50
+    assert len({case.id for case in suite.cases}) == 50
     assert suite.cases[0].required_sources == ("perform-check",)
 
 

@@ -13,9 +13,7 @@ def test_scoped_fixture_uses_core_scope_filters_before_ranking() -> None:
         StaticAuthorizationAdapter(
             {
                 ("user:ana", "tenant:acme"): (
-                    ScopedResource(
-                        tenant_id="tenant:acme", resource_id="document:acme-rollout"
-                    ),
+                    ScopedResource(tenant_id="tenant:acme", resource_id="document:acme-rollout"),
                 )
             }
         )

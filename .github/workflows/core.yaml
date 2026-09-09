@@ -22,4 +22,7 @@ jobs:
       - run: uv sync --all-groups
       - run: uv run ruff check .
       - run: uv run pyright
+      - run: >-
+          uv run pip-licenses --from=mixed
+          --allow-only="Apache-2.0;Apache-2.0 OR BSD-2-Clause;BSD-2-Clause;BSD License;MIT;MIT License;PSF-2.0"
       - run: uv run pytest

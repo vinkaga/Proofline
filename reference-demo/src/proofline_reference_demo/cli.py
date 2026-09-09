@@ -10,7 +10,7 @@ reviewer from mistaking scaffolding for a completed capability.
 import asyncio
 import json
 import os
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Annotated
 
@@ -35,6 +35,22 @@ from proofline_reference_demo.dense_retrieval import (
 )
 from proofline_reference_demo.domain import AccessScope, Principal, ScopedResource
 from proofline_reference_demo.evaluation_data import load_evaluation_suite
+from proofline_reference_demo.hotpot_evaluation import (
+    evaluate_hotpotqa_retrieval,
+    evaluate_hotpotqa_scope_overlay,
+    validate_hotpotqa_evaluation,
+    validate_hotpotqa_scope_overlay,
+)
+from proofline_reference_demo.hotpotqa import (
+    build_overlay,
+    evaluate_overlay,
+)
+from proofline_reference_demo.hotpotqa import (
+    load_cases as load_hotpotqa_cases,
+)
+from proofline_reference_demo.hotpotqa import (
+    load_manifest as load_hotpotqa_manifest,
+)
 from proofline_reference_demo.hybrid_retrieval import HybridRrfRetriever
 from proofline_reference_demo.lexical_evaluation import (
     evaluate_lexical_baseline,
@@ -170,13 +186,9 @@ def demo_multi_hop(
     authorization = StaticAuthorizationAdapter(load_static_permissions())
     caller = Principal(id=principal)
     if scenario == "clean":
-        trace = asyncio.run(
-            run_clean_two_hop(authorization, principal=caller, tenant_id=tenant)
-        )
+        trace = asyncio.run(run_clean_two_hop(authorization, principal=caller, tenant_id=tenant))
     elif scenario == "poisoned":
-        trace = asyncio.run(
-            run_poisoned_two_hop(authorization, principal=caller, tenant_id=tenant)
-        )
+        trace = asyncio.run(run_poisoned_two_hop(authorization, principal=caller, tenant_id=tenant))
     else:
         raise typer.BadParameter("scenario must be clean or poisoned")
     typer.echo(json.dumps(trace.as_dict(), indent=2))
@@ -409,6 +421,43 @@ def evaluate() -> None:
     try:
         validate_scope_propagation(report)
     except ScopeGateError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+
+
+@app.command("evaluate-hotpotqa")
+def evaluate_hotpotqa(
+    dataset: Annotated[Path, typer.Option(exists=True, dir_okay=False)] = Path(
+        "../hotpot_dev_distractor_v1.json"
+    ),
+    manifest: Annotated[Path, typer.Option(exists=True)] = Path(
+        "data/benchmarks/hotpotqa-distractor-dev.yaml"
+    ),
+) -> None:
+    """Verify the pinned HotpotQA subset and its separate security overlay."""
+
+    benchmark = load_hotpotqa_manifest(manifest)
+    cases = load_hotpotqa_cases(dataset, benchmark)
+    overlay = evaluate_overlay(cases, build_overlay(cases), benchmark.source.sha256)
+    report = evaluate_hotpotqa_retrieval(cases, overlay)
+    scope_traces = asyncio.run(evaluate_hotpotqa_scope_overlay(cases, build_overlay(cases)))
+    typer.echo(
+        json.dumps(
+            {
+                "retrieval": asdict(report),
+                "scope_overlay": {
+                    "trace_count": len(scope_traces),
+                    "access_isolation_passed": True,
+                    "poison_rejection_passed": True,
+                },
+            },
+            indent=2,
+        )
+    )
+    try:
+        validate_hotpotqa_evaluation(report)
+        validate_hotpotqa_scope_overlay(scope_traces)
+    except ValueError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
 

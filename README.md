@@ -5,6 +5,8 @@
 
 Capability-attenuating retrieval for permission-preserving multi-hop RAG.
 
+Proofline prevents a multi-hop RAG planner from expanding retrieval authority through retrieved content, while preserving ordinary authorized follow-up retrieval.
+
 Proofline is a small Python library that wraps an application's existing
 retriever. Trusted application code supplies the caller context; on every
 retrieval hop, Proofline derives and applies the corresponding authorization
@@ -351,7 +353,7 @@ interpret.
 
 ## Reference-demo evaluation
 
-The checked-in release suite currently contains 25 hand-authored, versioned
+The checked-in release suite currently contains 50 hand-authored, versioned
 retrieval and permission cases. A separate deterministic scope-propagation gate
 compares clean, benign, and poisoned multi-hop counterparts across three
 controls: an intentionally insecure baseline, ACL filtering on every hop, and

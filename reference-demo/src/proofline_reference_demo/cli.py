@@ -18,6 +18,7 @@ import typer
 from qdrant_client import QdrantClient
 
 from proofline_reference_demo.authorization import AuthorizationAdapter, StaticAuthorizationAdapter
+from proofline_reference_demo.bounded_host import run_bounded_host
 from proofline_reference_demo.corpus import (
     build_corpus,
     load_access_assignments,
@@ -41,7 +42,9 @@ from proofline_reference_demo.lexical_evaluation import (
     write_lexical_report,
     write_lexical_traces,
 )
+from proofline_reference_demo.multi_hop import run_clean_two_hop, run_poisoned_two_hop
 from proofline_reference_demo.openfga_fixture import load_static_permissions, provision_openfga
+from proofline_reference_demo.permission_mcp import build_permission_server
 from proofline_reference_demo.reranking import RerankingRetriever, TokenCoverageReranker
 from proofline_reference_demo.retrieval import AccessGatedBm25Retriever, RetrievalResult
 from proofline_reference_demo.retrieval_comparison import write_method_comparison_report
@@ -135,6 +138,43 @@ def demo_check_access(
         _check_access_with_openfga(server_url, caller, relation, resource, tenant)
     )
     typer.echo(json.dumps({"allowed": allowed}))
+
+
+@app.command("serve-mcp")
+def serve_mcp(
+    principal: Annotated[str, typer.Option()] = "user:ana",
+    tenant: Annotated[str, typer.Option()] = "tenant:acme",
+) -> None:
+    """Serve the context-bound fixture ``check_access`` MCP tool over stdio."""
+
+    build_permission_server(
+        StaticAuthorizationAdapter(load_static_permissions()),
+        principal=Principal(id=principal),
+        tenant_id=tenant,
+    ).run()
+
+
+@app.command("demo-multi-hop")
+def demo_multi_hop(
+    scenario: Annotated[str, typer.Option()] = "clean",
+    principal: Annotated[str, typer.Option()] = "user:ana",
+    tenant: Annotated[str, typer.Option()] = "tenant:acme",
+) -> None:
+    """Run the clean or poisoned deterministic two-hop fixture."""
+
+    authorization = StaticAuthorizationAdapter(load_static_permissions())
+    caller = Principal(id=principal)
+    if scenario == "clean":
+        trace = asyncio.run(
+            run_clean_two_hop(authorization, principal=caller, tenant_id=tenant)
+        )
+    elif scenario == "poisoned":
+        trace = asyncio.run(
+            run_poisoned_two_hop(authorization, principal=caller, tenant_id=tenant)
+        )
+    else:
+        raise typer.BadParameter("scenario must be clean or poisoned")
+    typer.echo(json.dumps(trace.as_dict(), indent=2))
 
 
 @app.command("evaluate-lexical")
@@ -329,10 +369,28 @@ async def _check_access_with_openfga(
 
 
 @app.command()
-def query() -> None:
-    """Run one request through the bounded agent. Available in Phase 6."""
+def query(
+    query_text: Annotated[str, typer.Option("--query")] = (
+        "What approval does Acme need for rollout?"
+    ),
+    principal: Annotated[str, typer.Option()] = "user:ana",
+    tenant: Annotated[str, typer.Option()] = "tenant:acme",
+    relation: Annotated[str, typer.Option()] = "viewer",
+    resource: Annotated[str | None, typer.Option()] = None,
+) -> None:
+    """Run one deterministic bounded host request through the reference fixture."""
 
-    _not_available("query", phase=6)
+    trace = asyncio.run(
+        run_bounded_host(
+            StaticAuthorizationAdapter(load_static_permissions()),
+            principal=Principal(id=principal),
+            tenant_id=tenant,
+            query=query_text,
+            relation=relation,
+            resource_id=resource,
+        )
+    )
+    typer.echo(json.dumps(trace.as_dict(), indent=2))
 
 
 @app.command()

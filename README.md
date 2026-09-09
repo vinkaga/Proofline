@@ -112,9 +112,15 @@ or security.
 3. **A reproducible public-data demonstration.** A version-pinned corpus and
    synthetic access relationships. Its `demo-tenant-search` command resolves
    authorization and routes the fixture through the core wrapper.
+4. **A deterministic multi-hop fixture.** A clean two-hop path preserves its
+   inherited scope; a synthetic scope-bearing planner proposal is rejected
+   before it can trigger a follow-up retrieval.
+5. **A bounded reference host.** Deterministic request routing uses a
+   context-bound MCP permission tool or scoped retrieval, then returns a cited
+   evidence response or an explicit abstention.
 
-The adversarial multi-hop evaluation, framework examples, and comparison of
-insecure versus scope-preserving planners remain planned work. They are not
+The larger adversarial multi-hop evaluation, framework examples, and comparison
+of insecure versus scope-preserving planners remain planned work. They are not
 claimed as current capabilities.
 
 ## Repository layout
@@ -487,6 +493,33 @@ Run the deterministic access-gated fixture and inspect its JSON trace with:
 
 ```bash
 OPENFGA_URL=http://localhost:8080 uv run proofline-reference-demo demo-tenant-search
+```
+
+Run the deterministic clean and poisoned two-hop fixtures with the static test
+authorization adapter:
+
+```bash
+uv run proofline-reference-demo demo-multi-hop --scenario clean
+uv run proofline-reference-demo demo-multi-hop --scenario poisoned
+```
+
+The poisoned fixture is a deterministic test of the planner-input boundary; it
+does not claim to detect arbitrary prompt injection or document poisoning.
+
+Run the bounded reference host with a tenant-knowledge or permission request:
+
+```bash
+uv run proofline-reference-demo query --query "What approval does Acme need for rollout?"
+uv run proofline-reference-demo query --query "Can Ana view the Beta rollout?" \
+  --tenant tenant:beta --resource document:beta-rollout
+```
+
+The fixture's MCP server exposes only `check_access` over stdio. Its caller
+context is bound when the server starts, so the tool accepts `relation` and
+`resource_id`, never a model-supplied principal or tenant:
+
+```bash
+uv run proofline-reference-demo serve-mcp --principal user:ana --tenant tenant:acme
 ```
 
 The same fixture exposes one authoritative permission decision with:

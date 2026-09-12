@@ -3,6 +3,9 @@
 
 import asyncio
 
+import pytest
+from proofline import ScopeError
+
 from proofline_reference_demo.authorization import StaticAuthorizationAdapter
 from proofline_reference_demo.domain import Principal, ScopedResource
 from proofline_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
@@ -33,4 +36,43 @@ def test_scoped_fixture_uses_core_scope_filters_before_ranking() -> None:
         "document:public-policy",
         "document:public-security-guidance",
     }
-    assert results.scope.filters["resource_id"] == frozenset({"document:acme-rollout"})
+    assert results.scope.filters["resource_id"] == frozenset(
+        {
+            "document:acme-rollout",
+            "document:public-fga",
+            "document:public-policy",
+            "document:public-security-guidance",
+        }
+    )
+
+
+def test_scoped_fixture_applies_narrowing_to_public_chunks_and_rejects_unknown_fields() -> None:
+    retriever = build_scoped_fixture(
+        StaticAuthorizationAdapter(
+            {
+                ("user:ana", "tenant:acme"): (
+                    ScopedResource(tenant_id="tenant:acme", resource_id="document:acme-rollout"),
+                )
+            }
+        )
+    )
+    context = DemoRequestContext(principal=Principal(id="user:ana"), tenant_id="tenant:acme")
+    initial = asyncio.run(retriever.search("release approval", context=context))
+
+    narrowed = asyncio.run(
+        retriever.follow_up_trusted(
+            initial,
+            "release approval",
+            narrowing_filters={"resource_id": ["document:public-policy"]},
+        )
+    )
+
+    assert [candidate.resource_id for candidate in narrowed.items] == ["document:public-policy"]
+    with pytest.raises(ScopeError, match="does not support"):
+        asyncio.run(
+            retriever.follow_up_trusted(
+                initial,
+                "release approval",
+                narrowing_filters={"visibility": ["public"]},
+            )
+        )

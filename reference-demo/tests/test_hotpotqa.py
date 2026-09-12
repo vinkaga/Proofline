@@ -7,6 +7,7 @@ import json
 from dataclasses import replace
 
 import pytest
+from proofline import RetrievalScope
 from typer.testing import CliRunner
 
 import proofline_reference_demo.cli as cli
@@ -26,6 +27,7 @@ from proofline_reference_demo.hotpotqa import (
     evaluate_overlay,
     load_cases,
 )
+from proofline_reference_demo.retrieval import DocumentChunk
 
 runner = CliRunner()
 
@@ -119,6 +121,23 @@ def test_hotpotqa_loader_rejects_a_hash_mismatch(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
         load_cases(path, _manifest(payload))
+
+
+def test_hotpot_backend_applies_tenant_and_resource_filters_conjunctively() -> None:
+    backend = hotpot_evaluation._backend_for_chunks(
+        (
+            DocumentChunk("acme", "document:shared", "tenant:acme", "shared evidence"),
+            DocumentChunk("beta", "document:shared", "tenant:beta", "shared evidence"),
+        )
+    )
+    filters = RetrievalScope.root(
+        principal="user:benchmark",
+        filters={"tenant_id": ["tenant:acme"], "resource_id": ["document:shared"]},
+    ).filters
+
+    candidates = backend("shared", filters=filters, limit=10)
+
+    assert [candidate.chunk_id for candidate in candidates] == ["acme"]
 
 
 def test_hotpotqa_scope_gate_detects_an_actual_benign_follow_up_exposure(

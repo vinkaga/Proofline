@@ -33,7 +33,7 @@ from proofline_reference_demo.dense_retrieval import (
     TokenHashEmbeddingProvider,
     write_dense_comparison_report,
 )
-from proofline_reference_demo.domain import AccessScope, Principal, ScopedResource
+from proofline_reference_demo.domain import Principal
 from proofline_reference_demo.evaluation_data import load_evaluation_suite
 from proofline_reference_demo.hotpot_evaluation import (
     evaluate_hotpotqa_retrieval,
@@ -369,20 +369,12 @@ async def _search_through_proofline(
         query,
         context=DemoRequestContext(principal=caller, tenant_id=tenant),
     )
-    resource_ids = results.scope.filters["resource_id"]
-    typed_resource_ids = tuple(
-        resource_id for resource_id in resource_ids if isinstance(resource_id, str)
-    )
-    if len(typed_resource_ids) != len(resource_ids):
-        raise TypeError("reference-demo resource IDs must be strings")
+    # The retrieval scope also contains public-resource allowlist entries so
+    # the backend can apply all filters conjunctively. Report authorization
+    # output separately rather than mislabeling those public entries as grants.
+    access_scope = await authorization.list_permitted_resources(caller, tenant)
     return RetrievalResult(
-        access_scope=AccessScope(
-            tenant_id=tenant,
-            resources=tuple(
-                ScopedResource(tenant_id=tenant, resource_id=resource_id)
-                for resource_id in sorted(typed_resource_ids)
-            ),
-        ),
+        access_scope=access_scope,
         candidates=results.items,
     )
 

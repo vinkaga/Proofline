@@ -7,7 +7,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from proofline import ProposedRetrievalStep, ProposedStepError, RetrievalScope, scoped
+from proofline import (
+    ProposedRetrievalStep,
+    ProposedStepError,
+    RetrievalScope,
+    matches_scope_filters,
+    scoped,
+    validate_scope_filter_fields,
+)
 from proofline.scope import ScopeFilters
 
 from proofline_reference_demo.authorization import StaticAuthorizationAdapter
@@ -166,7 +173,7 @@ async def _resolve_scope(
     access_scope = await authorization.list_permitted_resources(caller, "tenant:acme")
     return RetrievalScope.root(
         principal=caller.id,
-        filters={"resource_id": access_scope.resource_ids},
+        filters={"tenant_id": ["tenant:acme"], "resource_id": access_scope.resource_ids},
         max_follow_ups=1,
         policy_version="hotpotqa-overlay-v1",
     )
@@ -177,11 +184,19 @@ def _backend_for_chunks(
 ) -> Callable[..., tuple[RetrievalCandidate, ...]]:
     """Return the host's ordinary filtered-search callable for one case."""
 
+    supported_filter_fields = frozenset({"tenant_id", "resource_id"})
+
     def backend(query: str, *, filters: ScopeFilters, limit: int) -> tuple[RetrievalCandidate, ...]:
-        resource_ids = filters.get("resource_id", frozenset())
-        if not all(isinstance(resource_id, str) for resource_id in resource_ids):
-            raise TypeError("HotpotQA resource IDs must be strings")
-        permitted = tuple(chunk for chunk in chunks if chunk.resource_id in resource_ids)
+        validate_scope_filter_fields(filters, supported_fields=supported_filter_fields)
+        permitted = tuple(
+            chunk
+            for chunk in chunks
+            if matches_scope_filters(
+                {"tenant_id": chunk.tenant_id, "resource_id": chunk.resource_id},
+                filters,
+                supported_fields=supported_filter_fields,
+            )
+        )
         return AccessGatedBm25Retriever._rank(query, permitted, limit)
 
     return backend

@@ -7,7 +7,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from proofline import RetrievalScope, ScopedRetriever, ScopeFilters, scoped
+from proofline import (
+    RetrievalScope,
+    ScopedRetriever,
+    ScopeFilters,
+    matches_scope_filters,
+    scoped,
+    validate_scope_filter_fields,
+)
 
 from proofline_reference_demo.authorization import AuthorizationAdapter
 from proofline_reference_demo.domain import Principal, RetrievalCandidate
@@ -33,6 +40,7 @@ def build_scoped_fixture(
     """Build a demo retriever that resolves authorization before every search."""
 
     chunks = vertical_slice_chunks()
+    supported_filter_fields = frozenset({"tenant_id", "resource_id"})
 
     async def resolve_scope(context: DemoRequestContext) -> RetrievalScope:
         with trace_operation(
@@ -45,8 +53,13 @@ def build_scoped_fixture(
         return RetrievalScope.root(
             principal=context.principal.id,
             filters={
-                "tenant_id": [context.tenant_id],
-                "resource_id": list(access_scope.resource_ids),
+                # Public chunks are included as explicit allowlist entries,
+                # rather than bypassing the scope's conjunctive filters.
+                "tenant_id": [None, context.tenant_id],
+                "resource_id": [
+                    *access_scope.resource_ids,
+                    *(chunk.resource_id for chunk in chunks if chunk.is_public),
+                ],
             },
             policy_version="reference-demo",
             max_follow_ups=max_follow_ups,
@@ -60,13 +73,15 @@ def build_scoped_fixture(
     ) -> tuple[RetrievalCandidate, ...]:
         if on_retrieval is not None:
             on_retrieval(query, filters)
-        tenant_ids = filters.get("tenant_id", frozenset())
-        resource_ids = filters.get("resource_id", frozenset())
+        validate_scope_filter_fields(filters, supported_fields=supported_filter_fields)
         permitted_chunks = tuple(
             chunk
             for chunk in chunks
-            if chunk.is_public
-            or (chunk.tenant_id in tenant_ids and chunk.resource_id in resource_ids)
+            if matches_scope_filters(
+                {"tenant_id": chunk.tenant_id, "resource_id": chunk.resource_id},
+                filters,
+                supported_fields=supported_filter_fields,
+            )
         )
         return AccessGatedBm25Retriever._rank(query, permitted_chunks, limit)
 

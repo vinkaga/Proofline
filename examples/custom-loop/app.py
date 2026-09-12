@@ -7,7 +7,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from proofline import ProposedRetrievalStep, RetrievalScope, ScopedRetriever, scoped
+from proofline import (
+    ProposedRetrievalStep,
+    RetrievalScope,
+    ScopedRetriever,
+    matches_scope_filters,
+    scoped,
+    validate_scope_filter_fields,
+)
 from proofline.scope import ScopeFilters
 
 
@@ -47,12 +54,17 @@ def build_retriever() -> ScopedRetriever[RequestContext, Document]:
     def search(
         query: str, *, filters: ScopeFilters, limit: int
     ) -> tuple[Document, ...]:
-        allowed = filters["resource_id"]
+        supported_filter_fields = frozenset({"resource_id"})
+        validate_scope_filter_fields(filters, supported_fields=supported_filter_fields)
         query_words = frozenset(query.lower().split())
         matches = tuple(
             document
             for document in DOCUMENTS
-            if document.resource_id in allowed
+            if matches_scope_filters(
+                {"resource_id": document.resource_id},
+                filters,
+                supported_fields=supported_filter_fields,
+            )
             and query_words.intersection(document.text.lower().replace(".", "").split())
         )
         return matches[:limit]

@@ -41,6 +41,39 @@ For a model-proposed follow-up, parse the proposal then call
 `follow_proposed(previous_results, proposal)`. Only trusted host code may use
 `follow_up_trusted(..., narrowing_filters=...)`.
 
+## Backend filter contract
+
+The wrapped backend is part of the authorization boundary. It must reject
+fields it has not implemented and match every supplied field conjunctively;
+an empty allowlist must match nothing. `validate_scope_filter_fields` and
+`matches_scope_filters` provide this contract for adapters whose candidate
+metadata can be represented as scalar fields:
+
+```python
+from proofline import matches_scope_filters, validate_scope_filter_fields
+
+SUPPORTED_FILTERS = frozenset({"tenant_id", "resource_id"})
+
+
+def search(query, *, filters, limit):
+    validate_scope_filter_fields(filters, supported_fields=SUPPORTED_FILTERS)
+    candidates = (
+        document
+        for document in documents
+        if matches_scope_filters(
+            {"tenant_id": document.tenant_id, "resource_id": document.resource_id},
+            filters,
+            supported_fields=SUPPORTED_FILTERS,
+        )
+    )
+    return rank(query, candidates, limit)
+```
+
+The matcher treats values with different Python scalar types as distinct. If a
+backend needs a public-content exception, represent that content in the trusted
+root allowlists or use a separate public retrieval path; do not bypass supplied
+filters while selecting candidates.
+
 ## The problem
 
 Most retrieval demos answer questions from a document collection. An

@@ -4,9 +4,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from math import isfinite
 from types import MappingProxyType
 from typing import TypeAlias
 from uuid import uuid4
@@ -19,6 +20,29 @@ ScopeFilters: TypeAlias = Mapping[str, frozenset[FilterAtom]]
 ScopeMetadata: TypeAlias = Mapping[str, str]
 
 
+def _freeze_filter_values(values: Iterable[FilterAtom]) -> frozenset[FilterAtom]:
+    """Validate and freeze filter atoms without conflating scalar types."""
+
+    validated: list[FilterAtom] = []
+    for value in values:
+        if type(value) not in (str, int, float, bool, type(None)):
+            raise ScopeError("filter values must be strings, integers, floats, booleans, or null")
+        if isinstance(value, float) and not isfinite(value):
+            raise ScopeError("filter float values must be finite")
+        if any(type(value) is not type(existing) and value == existing for existing in validated):
+            raise ScopeError("filter values that compare equal must have the same type")
+        validated.append(value)
+    return frozenset(validated)
+
+
+def _typed_filter_values(
+    values: Iterable[FilterAtom],
+) -> frozenset[tuple[type[object], FilterAtom]]:
+    """Return filter values keyed by their exact runtime scalar type."""
+
+    return frozenset((type(value), value) for value in values)
+
+
 class ScopeError(ValueError):
     """Raised when a scope is invalid or attempts to gain authority."""
 
@@ -27,14 +51,58 @@ class ScopeExpiredError(ScopeError):
     """Raised when a scope is used after its trusted expiry time."""
 
 
+_MISSING_FILTER_VALUE = object()
+
+
+def validate_scope_filter_fields(
+    filters: ScopeFilters, *, supported_fields: Collection[str]
+) -> None:
+    """Reject scope filters that a backend has not explicitly implemented.
+
+    Call this before ranking or querying a backend. A backend must either
+    support every supplied field or reject the request; silently ignoring a
+    narrowing field can widen retrieval authority.
+    """
+
+    unsupported_fields = sorted(set(filters).difference(supported_fields))
+    if unsupported_fields:
+        raise ScopeError(f"backend does not support scope filters: {unsupported_fields!r}")
+
+
+def matches_scope_filters(
+    candidate: Mapping[str, FilterAtom],
+    filters: ScopeFilters,
+    *,
+    supported_fields: Collection[str],
+) -> bool:
+    """Return whether a candidate satisfies every supported scope filter.
+
+    Each field is an allowlist and fields are conjunctive. Empty allowlists and
+    missing candidate fields match nothing. Scalar comparisons preserve exact
+    runtime type, so ``True``, ``1``, and ``1.0`` remain distinct.
+    """
+
+    validate_scope_filter_fields(filters, supported_fields=supported_fields)
+    for field_name, permitted_values in filters.items():
+        candidate_value = candidate.get(field_name, _MISSING_FILTER_VALUE)
+        if candidate_value is _MISSING_FILTER_VALUE or not permitted_values:
+            return False
+        if not any(
+            type(candidate_value) is type(permitted_value) and candidate_value == permitted_value
+            for permitted_value in permitted_values
+        ):
+            return False
+    return True
+
+
 def _freeze_filters(filters: Mapping[str, Iterable[FilterAtom]]) -> ScopeFilters:
     frozen: dict[str, frozenset[FilterAtom]] = {}
     for field_name, values in filters.items():
-        if not field_name:
-            raise ScopeError("filter names must not be empty")
+        if not isinstance(field_name, str) or not field_name:
+            raise ScopeError("filter names must be non-empty strings")
         if isinstance(values, (str, bytes)):
             raise ScopeError("filter values must be an iterable of scalar values, not a string")
-        frozen[field_name] = frozenset(values)
+        frozen[field_name] = _freeze_filter_values(values)
     return MappingProxyType(frozen)
 
 
@@ -134,7 +202,9 @@ class RetrievalScope:
         child_filters = dict(self.filters)
         for field_name, child_values in requested.items():
             parent_values = self.filters.get(field_name)
-            if parent_values is not None and not child_values.issubset(parent_values):
+            if parent_values is not None and not _typed_filter_values(child_values).issubset(
+                _typed_filter_values(parent_values)
+            ):
                 raise ScopeError(f"child scope widens filter {field_name!r}")
             child_filters[field_name] = child_values
         return RetrievalScope(

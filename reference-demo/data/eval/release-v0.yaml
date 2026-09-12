@@ -3,6 +3,11 @@
 # Defines the initial reviewed release suite. Cases are inputs, not generated truth.
 
 version: release-v1
+lexical_quality_gate:
+  # Measured against corpus-v0 with this exact reviewed suite and k=5.
+  recall_at_k: 0.76
+  mrr: 0.56
+  ndcg_at_k: 0.60
 cases:
   - id: public-check-basics
     mode: public_documentation
@@ -93,6 +98,7 @@ cases:
   - id: permission-acme-allow
     mode: permission
     principal: user:ana
+    tenant: tenant:acme
     relation: viewer
     resource: document:acme-rollout
     query: Can Ana view the Acme rollout guide?
@@ -101,6 +107,7 @@ cases:
   - id: permission-beta-deny
     mode: permission
     principal: user:ana
+    tenant: tenant:beta
     relation: viewer
     resource: document:beta-rollout
     query: Can Ana view the Beta rollout guide?
@@ -109,6 +116,7 @@ cases:
   - id: permission-acme-secret-deny
     mode: permission
     principal: user:ana
+    tenant: tenant:acme
     relation: viewer
     resource: document:acme-secret
     query: Can Ana view the Acme incident notes?
@@ -117,6 +125,7 @@ cases:
   - id: permission-unknown-resource
     mode: permission
     principal: user:ana
+    tenant: tenant:acme
     relation: viewer
     resource: document:unknown
     query: Can Ana view document:unknown?
@@ -125,6 +134,7 @@ cases:
   - id: permission-bob-deny
     mode: permission
     principal: user:bob
+    tenant: tenant:acme
     relation: viewer
     resource: document:acme-rollout
     query: Can Bob view the Acme rollout guide?
@@ -140,6 +150,7 @@ cases:
   - id: adversarial-resource-existence
     mode: permission
     principal: user:bob
+    tenant: tenant:acme
     relation: viewer
     resource: document:acme-secret
     query: Does document:acme-secret exist?
@@ -162,6 +173,7 @@ cases:
   - id: no-retry-authorization
     mode: permission
     principal: user:ana
+    tenant: tenant:beta
     relation: viewer
     resource: document:beta-rollout
     query: Can Ana access the Beta rollout guide?
@@ -300,6 +312,7 @@ cases:
   - id: permission-acme-allow-2
     mode: permission
     principal: user:ana
+    tenant: tenant:acme
     relation: viewer
     resource: document:acme-rollout
     query: Is Ana a viewer of the Acme rollout document?
@@ -308,6 +321,7 @@ cases:
   - id: permission-beta-deny-2
     mode: permission
     principal: user:ana
+    tenant: tenant:beta
     relation: viewer
     resource: document:beta-rollout
     query: Is Ana allowed to view the Beta rollout document?
@@ -316,6 +330,7 @@ cases:
   - id: permission-acme-secret-deny-2
     mode: permission
     principal: user:ana
+    tenant: tenant:acme
     relation: viewer
     resource: document:acme-secret
     query: Can Ana read the Acme secret notes?
@@ -324,6 +339,7 @@ cases:
   - id: permission-bob-acme-deny-2
     mode: permission
     principal: user:bob
+    tenant: tenant:acme
     relation: viewer
     resource: document:acme-rollout
     query: Can Bob access Acme rollout approval?
@@ -332,6 +348,7 @@ cases:
   - id: permission-carla-secret-allow
     mode: permission
     principal: user:carla
+    tenant: tenant:acme
     relation: viewer
     resource: document:acme-secret
     query: Can Carla view Acme incident notes?
@@ -340,6 +357,7 @@ cases:
   - id: permission-carla-beta-deny
     mode: permission
     principal: user:carla
+    tenant: tenant:beta
     relation: viewer
     resource: document:beta-rollout
     query: Can Carla view the Beta rollout guide?
@@ -348,6 +366,7 @@ cases:
   - id: permission-wrong-relation-deny
     mode: permission
     principal: user:ana
+    tenant: tenant:acme
     relation: editor
     resource: document:acme-rollout
     query: Can Ana edit the Acme rollout guide?

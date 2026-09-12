@@ -18,9 +18,11 @@ from proofline import (
 
 from proofline_reference_demo.authorization import AuthorizationAdapter
 from proofline_reference_demo.domain import Principal, RetrievalCandidate
-from proofline_reference_demo.retrieval import AccessGatedBm25Retriever
+from proofline_reference_demo.retrieval import AccessGatedBm25Retriever, DocumentChunk
 from proofline_reference_demo.tracing import trace_operation
 from proofline_reference_demo.vertical_slice import vertical_slice_chunks
+
+ChunkRanker = Callable[[str, tuple[DocumentChunk, ...], int], tuple[RetrievalCandidate, ...]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,10 +38,29 @@ def build_scoped_fixture(
     *,
     max_follow_ups: int | None = None,
     on_retrieval: Callable[[str, ScopeFilters], None] | None = None,
+    ranker: ChunkRanker | None = None,
 ) -> ScopedRetriever[DemoRequestContext, RetrievalCandidate]:
     """Build a demo retriever that resolves authorization before every search."""
 
-    chunks = vertical_slice_chunks()
+    return build_scoped_retriever(
+        vertical_slice_chunks(),
+        authorization,
+        max_follow_ups=max_follow_ups,
+        on_retrieval=on_retrieval,
+        ranker=ranker,
+    )
+
+
+def build_scoped_retriever(
+    chunks: tuple[DocumentChunk, ...],
+    authorization: AuthorizationAdapter,
+    *,
+    max_follow_ups: int | None = None,
+    on_retrieval: Callable[[str, ScopeFilters], None] | None = None,
+    ranker: ChunkRanker | None = None,
+) -> ScopedRetriever[DemoRequestContext, RetrievalCandidate]:
+    """Wrap a corpus backend with the reference adapter's full filter contract."""
+
     supported_filter_fields = frozenset({"tenant_id", "resource_id"})
 
     async def resolve_scope(context: DemoRequestContext) -> RetrievalScope:
@@ -83,6 +104,6 @@ def build_scoped_fixture(
                 supported_fields=supported_filter_fields,
             )
         )
-        return AccessGatedBm25Retriever._rank(query, permitted_chunks, limit)
+        return (ranker or AccessGatedBm25Retriever._rank)(query, permitted_chunks, limit)
 
     return scoped(search, resolve_scope=resolve_scope)

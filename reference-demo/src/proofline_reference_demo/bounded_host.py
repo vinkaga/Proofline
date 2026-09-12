@@ -13,7 +13,12 @@ from proofline_reference_demo.domain import Principal, RequestMode, RetrievalCan
 from proofline_reference_demo.permission_mcp import check_access_via_mcp
 from proofline_reference_demo.request_routing import classify_request
 from proofline_reference_demo.response_composition import ComposedResponse, compose_response
-from proofline_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
+from proofline_reference_demo.retrieval import AccessGatedBm25Retriever, DocumentChunk
+from proofline_reference_demo.scoped_fixture import (
+    DemoRequestContext,
+    build_scoped_fixture,
+    build_scoped_retriever,
+)
 from proofline_reference_demo.tracing import trace_operation
 
 
@@ -29,6 +34,7 @@ class BoundedHostTrace:
     citation_chunk_ids: tuple[str, ...]
     retrieval_hop_count: int
     tool_calls: tuple[str, ...] = ()
+    tool_arguments: tuple[dict[str, str], ...] = ()
     scope_ids: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
@@ -45,11 +51,13 @@ async def run_bounded_host(
     query: str,
     relation: str = "viewer",
     resource_id: str | None = None,
+    chunks: tuple[DocumentChunk, ...] | None = None,
+    request_mode: RequestMode | None = None,
 ) -> BoundedHostTrace:
     """Classify, authorize or retrieve, then cite or abstain with a fixed budget."""
 
     with trace_operation("proofline.request.classify", {"proofline.query_length": len(query)}):
-        mode = classify_request(query)
+        mode = request_mode or classify_request(query)
     transitions = ["classified"]
     if mode is RequestMode.PERMISSION:
         if resource_id is None:
@@ -75,6 +83,13 @@ async def run_bounded_host(
             citation_chunk_ids=(),
             retrieval_hop_count=0,
             tool_calls=("check_access",),
+            tool_arguments=(
+                {
+                    "tenant_id": tenant_id,
+                    "relation": relation,
+                    "resource_id": resource_id,
+                },
+            ),
         )
 
     retrieval_hop_count = 0
@@ -83,10 +98,30 @@ async def run_bounded_host(
         nonlocal retrieval_hop_count
         retrieval_hop_count += 1
 
-    retriever = build_scoped_fixture(
-        authorization,
-        max_follow_ups=1,
-        on_retrieval=count_retrieval,
+    if mode is RequestMode.PUBLIC_DOCUMENTATION and chunks is not None:
+        candidates = AccessGatedBm25Retriever.rank_for_answer(
+            query, tuple(chunk for chunk in chunks if chunk.is_public), 10
+        )
+        response = compose_response(query, candidates)
+        return _response_trace(
+            mode,
+            ["classified", "retrieved", "composed"],
+            response,
+            candidates,
+            1,
+            [],
+        )
+
+    retriever = (
+        build_scoped_fixture(authorization, max_follow_ups=1, on_retrieval=count_retrieval)
+        if chunks is None
+        else build_scoped_retriever(
+            chunks,
+            authorization,
+            max_follow_ups=1,
+            on_retrieval=count_retrieval,
+            ranker=AccessGatedBm25Retriever.rank_for_answer,
+        )
     )
     with trace_operation(
         "proofline.retrieval",

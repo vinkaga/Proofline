@@ -24,8 +24,13 @@ from proofline_reference_demo.evaluation_data import (
     EvaluationCaseSpec,
     EvaluationSuite,
     ExpectedOutcome,
+    LexicalQualityGate,
 )
 from proofline_reference_demo.retrieval import AccessGatedRetriever, RetrievalResult
+
+_MIN_RECALL_AT_K = 0.85
+_MIN_MRR = 0.62
+_MIN_NDCG_AT_K = 0.65
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,10 +342,22 @@ def write_lexical_traces(measurement: LexicalBaselineMeasurement, output: Path) 
     output.write_text("".join(f"{case.trace.model_dump_json()}\n" for case in measurement.cases))
 
 
-def validate_baseline_measurement(measurement: LexicalBaselineMeasurement) -> None:
-    """Fail a baseline run that did not preserve the Phase 3 safety contracts."""
+def validate_baseline_measurement(
+    measurement: LexicalBaselineMeasurement,
+    quality_gate: LexicalQualityGate | None = None,
+) -> None:
+    """Fail a release baseline that regresses safety, provenance, or utility."""
 
     if measurement.unauthorized_exposure_rate:
         raise ValueError("lexical evaluation exposed an unauthorized chunk")
     if measurement.provenance_violation_rate:
         raise ValueError("lexical evaluation returned a chunk without citation provenance")
+    minimum_recall = quality_gate.recall_at_k if quality_gate else _MIN_RECALL_AT_K
+    minimum_mrr = quality_gate.mrr if quality_gate else _MIN_MRR
+    minimum_ndcg = quality_gate.ndcg_at_k if quality_gate else _MIN_NDCG_AT_K
+    if measurement.recall_at_k < minimum_recall:
+        raise ValueError("lexical evaluation recall fell below the recorded release baseline")
+    if measurement.mrr < minimum_mrr:
+        raise ValueError("lexical evaluation MRR fell below the recorded release baseline")
+    if measurement.ndcg_at_k < minimum_ndcg:
+        raise ValueError("lexical evaluation nDCG fell below the recorded release baseline")

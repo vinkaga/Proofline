@@ -151,6 +151,12 @@ class OpenFgaAuthorizationAdapter:
         resource_id: str,
         tenant_id: str,
     ) -> bool:
+        # The public adapter contract currently exposes only the ``viewer``
+        # capability. Treat unsupported relations as denied at this boundary,
+        # matching the static adapter, rather than converting safe denials into
+        # OpenFGA validation errors.
+        if relation != "viewer":
+            return False
         if not await self._tenant_contains_resource(tenant_id, resource_id):
             return False
         response = await self._client.check(

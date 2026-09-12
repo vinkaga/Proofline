@@ -64,7 +64,14 @@ async def test_checked_in_model_enforces_tenant_membership_and_scope() -> None:
             "chunk:public-security-guidance",
             "chunk:acme-rollout",
         }
-        assert results.scope.filters["resource_id"] == frozenset({"document:acme-rollout"})
+        assert results.scope.filters["resource_id"] == frozenset(
+            {
+                "document:acme-rollout",
+                "document:public-fga",
+                "document:public-policy",
+                "document:public-security-guidance",
+            }
+        )
         clean_trace = await run_clean_two_hop(
             provisioned.adapter,
             principal=Principal(id="user:ana"),

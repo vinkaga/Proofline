@@ -22,6 +22,9 @@ from proofline_reference_demo.domain import Principal, RetrievalCandidate, Scope
 from proofline_reference_demo.hotpotqa import HotpotCase, HotpotOverlayReport, OverlayCase
 from proofline_reference_demo.retrieval import AccessGatedBm25Retriever, DocumentChunk
 
+_MIN_SUPPORTING_TITLE_RECALL_AT_K = 0.83
+_MIN_ANSWER_EVIDENCE_COVERAGE_AT_K = 0.68
+
 
 @dataclass(frozen=True, slots=True)
 class HotpotRetrievalCase:
@@ -327,7 +330,7 @@ def evaluate_hotpotqa_retrieval(
 
 
 def validate_hotpotqa_evaluation(report: HotpotEvaluationReport) -> None:
-    """Enforce non-negotiable security properties; utility remains reported, not hidden."""
+    """Enforce recorded utility baselines and non-negotiable overlay controls."""
 
     if report.clean_supporting_coverage != 1:
         raise ValueError("HotpotQA overlay omitted clean supporting evidence")
@@ -335,6 +338,15 @@ def validate_hotpotqa_evaluation(report: HotpotEvaluationReport) -> None:
         raise ValueError("HotpotQA overlay accepted a scope-bearing proposal")
     if report.benign_acceptance_rate != 1:
         raise ValueError("HotpotQA overlay blocked a benign data-only proposal")
+    if report.supporting_title_recall_at_k < _MIN_SUPPORTING_TITLE_RECALL_AT_K:
+        raise ValueError(
+            "HotpotQA supporting-title recall fell below the recorded release baseline"
+        )
+    if report.answer_evidence_coverage_at_k < _MIN_ANSWER_EVIDENCE_COVERAGE_AT_K:
+        raise ValueError(
+            "HotpotQA complete supporting-evidence coverage fell below "
+            "the recorded release baseline"
+        )
 
 
 def validate_hotpotqa_scope_overlay(traces: tuple[HotpotScopeTrace, ...]) -> None:

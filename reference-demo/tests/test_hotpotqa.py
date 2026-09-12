@@ -113,6 +113,11 @@ def test_verified_hotpotqa_subset_and_overlay_preserve_the_source_data(tmp_path)
     with pytest.raises(ValueError, match="did not reject before retrieval"):
         validate_hotpotqa_scope_controls(regressed)
 
+    with pytest.raises(ValueError, match="supporting-title recall"):
+        validate_hotpotqa_evaluation(replace(retrieval, supporting_title_recall_at_k=0.0))
+    with pytest.raises(ValueError, match="complete supporting-evidence coverage"):
+        validate_hotpotqa_evaluation(replace(retrieval, answer_evidence_coverage_at_k=0.0))
+
 
 def test_hotpotqa_loader_rejects_a_hash_mismatch(tmp_path) -> None:
     payload = _dataset()

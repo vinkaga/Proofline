@@ -17,7 +17,7 @@ ResultT = TypeVar("ResultT")
 ContextT_contra = TypeVar("ContextT_contra", contravariant=True)
 ResultT_co = TypeVar("ResultT_co", covariant=True)
 ScopeResolution = RetrievalScope | Awaitable[RetrievalScope]
-ScopeValidation = bool | Awaitable[bool]
+ScopeValidation = bool | str | Awaitable[bool | str]
 
 
 class ScopeResolver(Protocol[ContextT_contra]):
@@ -30,7 +30,12 @@ SearchReturn = Sequence[ResultT] | Awaitable[Sequence[ResultT]]
 
 
 class ScopeValidator(Protocol):
-    """Trusted host check used to reject a revoked scope before retrieval."""
+    """Trusted host check used to reject a scope before retrieval.
+
+    Return ``True`` to accept a scope, ``False`` for a generic rejection, or a
+    non-empty string with a safe diagnostic reason. The reason is surfaced to
+    the caller; it must not include secrets or protected document content.
+    """
 
     def __call__(self, scope: RetrievalScope) -> ScopeValidation: ...
 
@@ -102,12 +107,29 @@ class ScopedRetriever(Generic[ContextT, ResultT]):
         query: str,
         *,
         limit: int = 10,
+    ) -> ScopedResults[ResultT]:
+        """Run one subsequent retrieval under the inherited child scope.
+
+        This is safe for a query proposed by a model or retrieved document: it
+        has no authority-bearing arguments.
+        """
+
+        child_scope = previous.scope.attenuate()
+        return await self._search_under_scope(query, scope=child_scope, limit=limit)
+
+    async def follow_up_trusted(
+        self,
+        previous: ScopedResults[ResultT],
+        query: str,
+        *,
+        limit: int = 10,
         narrowing_filters: Mapping[str, Iterable[FilterAtom]] | None = None,
     ) -> ScopedResults[ResultT]:
-        """Run one subsequent retrieval under an equal or narrower child scope.
+        """Run a follow-up with trusted host-supplied narrowing filters.
 
-        ``narrowing_filters`` is an advanced host-application API. Never pass
-        values produced by a model or retrieved document to it.
+        Only authentication, authorization, or other trusted application code
+        may call this method. Never pass model or retrieved-document values to
+        ``narrowing_filters``.
         """
 
         child_scope = previous.scope.attenuate(narrowing_filters)
@@ -144,6 +166,12 @@ class ScopedRetriever(Generic[ContextT, ResultT]):
             accepted = self._validate_scope(scope)
             if inspect.isawaitable(accepted):
                 accepted = await accepted
+            if isinstance(accepted, str):
+                if accepted:
+                    raise ScopeValidationError(accepted)
+                raise ScopeValidationError("retrieval scope is no longer accepted by host policy")
+            if not isinstance(accepted, bool):
+                raise TypeError("scope validator must return bool or a diagnostic rejection string")
             if not accepted:
                 raise ScopeValidationError("retrieval scope is no longer accepted by host policy")
         result = self._backend(query, filters=scope.filters, limit=limit)

@@ -150,6 +150,11 @@ def _candidate_identifiers(candidate: RetrievalCandidate) -> str:
     # the source document, which remains stable even if a source URL changes.
     if candidate.tenant_id:
         return f"resource:{candidate.resource_id}"
+    if not candidate.document_id:
+        raise ValueError(
+            "public candidate "
+            f"{candidate.chunk_id!r} is missing a document_id for relevance grading"
+        )
     return f"source:{candidate.document_id}"
 
 

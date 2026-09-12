@@ -1,0 +1,19 @@
+[project]
+name = "proofline-custom-loop-example"
+version = "0.1.0"
+description = "Minimal custom-loop host for Proofline."
+requires-python = ">=3.10"
+dependencies = ["proofline"]
+
+[dependency-groups]
+dev = ["pyright>=1.1.400,<2", "pytest>=8.4,<9", "ruff>=0.12,<1"]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.uv.sources]
+proofline = { path = "../..", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

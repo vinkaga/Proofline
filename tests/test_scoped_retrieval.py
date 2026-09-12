@@ -49,7 +49,9 @@ def test_follow_up_inherits_scope_and_rejects_widening() -> None:
     )
     initial = asyncio.run(retriever.search("first", context=None))
     follow_up = asyncio.run(
-        retriever.follow_up(initial, "second", narrowing_filters={"resource_id": ["guide-a"]})
+        retriever.follow_up_trusted(
+            initial, "second", narrowing_filters={"resource_id": ["guide-a"]}
+        )
     )
 
     assert follow_up.scope.parent_scope_id == initial.scope.scope_id
@@ -57,7 +59,9 @@ def test_follow_up_inherits_scope_and_rejects_widening() -> None:
 
     with pytest.raises(ScopeError, match="widens"):
         asyncio.run(
-            retriever.follow_up(initial, "second", narrowing_filters={"resource_id": ["guide-c"]})
+            retriever.follow_up_trusted(
+                initial, "second", narrowing_filters={"resource_id": ["guide-c"]}
+            )
         )
 
 
@@ -124,3 +128,16 @@ def test_scope_validator_runs_before_each_retrieval_hop() -> None:
 
     with pytest.raises(ScopeValidationError, match="no longer"):
         asyncio.run(retriever.follow_up(initial, "second"))
+
+
+def test_scope_validator_can_return_a_safe_diagnostic_reason() -> None:
+    retriever = scoped(
+        lambda query, *, filters, limit: [query],
+        resolve_scope=lambda context: RetrievalScope.root(
+            principal="user:ana", filters={"resource_id": ["guide-a"]}
+        ),
+        validate_scope=lambda scope: "authorization policy version was revoked",  # noqa: ARG005
+    )
+
+    with pytest.raises(ScopeValidationError, match="policy version was revoked"):
+        asyncio.run(retriever.search("first", context=None))

@@ -17,3 +17,10 @@ services:
       - "6334:6334"
     volumes:
       - ./.qdrant:/qdrant/storage
+
+  phoenix:
+    image: arizephoenix/phoenix:15.5.1
+    profiles: ["observability"]
+    ports:
+      - "6006:6006"
+      - "4317:4317"

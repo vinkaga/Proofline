@@ -5,7 +5,7 @@
 import json
 import warnings
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from qdrant_client import QdrantClient
 from typer.testing import CliRunner
@@ -15,6 +15,16 @@ from proofline_reference_demo.authorization import StaticAuthorizationAdapter
 from proofline_reference_demo.domain import ScopedResource
 
 runner = CliRunner()
+
+
+def test_otlp_endpoint_is_an_explicit_global_cli_option(monkeypatch) -> None:
+    configure = Mock()
+    monkeypatch.setattr(cli, "configure_otlp_tracing", configure)
+
+    result = runner.invoke(cli.app, ["--otlp-endpoint", "http://collector/v1/traces", "evaluate"])
+
+    assert result.exit_code == 0
+    configure.assert_called_once_with("http://collector/v1/traces")
 
 
 def test_evaluate_runs_the_scope_propagation_release_gate() -> None:

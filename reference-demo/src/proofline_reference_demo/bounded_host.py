@@ -14,6 +14,7 @@ from proofline_reference_demo.permission_mcp import check_access_via_mcp
 from proofline_reference_demo.request_routing import classify_request
 from proofline_reference_demo.response_composition import ComposedResponse, compose_response
 from proofline_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
+from proofline_reference_demo.tracing import trace_operation
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,18 +48,23 @@ async def run_bounded_host(
 ) -> BoundedHostTrace:
     """Classify, authorize or retrieve, then cite or abstain with a fixed budget."""
 
-    mode = classify_request(query)
+    with trace_operation("proofline.request.classify", {"proofline.query_length": len(query)}):
+        mode = classify_request(query)
     transitions = ["classified"]
     if mode is RequestMode.PERMISSION:
         if resource_id is None:
             return _abstention_trace(mode, transitions + ["missing_permission_target"])
-        allowed = await check_access_via_mcp(
-            authorization,
-            principal=principal,
-            tenant_id=tenant_id,
-            relation=relation,
-            resource_id=resource_id,
-        )
+        with trace_operation(
+            "proofline.mcp.check_access",
+            {"proofline.relation": relation, "enduser.id": principal.id},
+        ):
+            allowed = await check_access_via_mcp(
+                authorization,
+                principal=principal,
+                tenant_id=tenant_id,
+                relation=relation,
+                resource_id=resource_id,
+            )
         transitions.extend(("checked_access", "allowed" if allowed else "denied"))
         return BoundedHostTrace(
             request_mode=mode,
@@ -82,27 +88,36 @@ async def run_bounded_host(
         max_follow_ups=1,
         on_retrieval=count_retrieval,
     )
-    initial = await retriever.search(
-        query,
-        context=DemoRequestContext(principal=principal, tenant_id=tenant_id),
-    )
+    with trace_operation(
+        "proofline.retrieval",
+        {"proofline.hop": 0, "enduser.id": principal.id},
+    ):
+        initial = await retriever.search(
+            query,
+            context=DemoRequestContext(principal=principal, tenant_id=tenant_id),
+        )
     transitions.append("retrieved")
     candidates = initial.items
     scope_ids = [initial.scope.scope_id]
 
     if mode is RequestMode.TENANT_KNOWLEDGE and _requires_fixture_follow_up(query, candidates):
-        proposed = ProposedRetrievalStep.from_untrusted(
-            {
-                "query": "public release approval policy",
-                "parent_step_id": initial.scope.scope_id,
-            }
-        )
-        follow_up = await retriever.follow_proposed(initial, proposed)
+        with trace_operation("proofline.planner.proposal", {"proofline.hop": 1}):
+            proposed = ProposedRetrievalStep.from_untrusted(
+                {
+                    "query": "public release approval policy",
+                    "parent_step_id": initial.scope.scope_id,
+                }
+            )
+        with trace_operation("proofline.retrieval", {"proofline.hop": 1}):
+            follow_up = await retriever.follow_proposed(initial, proposed)
         candidates = _unique_candidates(candidates + follow_up.items)
         scope_ids.append(follow_up.scope.scope_id)
         transitions.append("followed_up")
 
-    response = compose_response(query, candidates)
+    with trace_operation(
+        "proofline.response.compose", {"proofline.candidate_count": len(candidates)}
+    ):
+        response = compose_response(query, candidates)
     transitions.append("abstained" if response.abstained else "composed")
     return _response_trace(
         mode,

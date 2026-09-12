@@ -72,6 +72,23 @@ async def test_list_objects_follows_tenant_tuple_pages() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_objects_rejects_a_repeated_pagination_token() -> None:
+    client = SimpleNamespace(
+        list_objects=AsyncMock(return_value=SimpleNamespace(objects=["document:a"])),
+        read=AsyncMock(
+            side_effect=[
+                SimpleNamespace(tuples=[], continuation_token="same-page"),
+                SimpleNamespace(tuples=[], continuation_token="same-page"),
+            ]
+        ),
+    )
+    adapter = OpenFgaAuthorizationAdapter(client)  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match="repeated a continuation token"):
+        await adapter.list_permitted_resources(Principal(id="user:ana"), "tenant:acme")
+
+
+@pytest.mark.asyncio
 async def test_check_builds_request_and_maps_allowed_response() -> None:
     client = SimpleNamespace(
         check=AsyncMock(return_value=SimpleNamespace(allowed=True)),

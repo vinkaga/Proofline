@@ -5,11 +5,12 @@
 from dataclasses import replace
 
 import pytest
+from proofline import ScopedRetriever
 
 from proofline_reference_demo.authorization import StaticAuthorizationAdapter
+from proofline_reference_demo.domain import RetrievalCandidate
 from proofline_reference_demo.openfga_fixture import load_static_permissions
 from proofline_reference_demo.scope_evaluation import (
-    GateFailure,
     ScopeGateError,
     evaluate_scope_propagation,
     validate_scope_propagation,
@@ -57,17 +58,34 @@ async def test_scope_propagation_gate_records_clean_benign_and_poisoned_traces()
 
 
 @pytest.mark.asyncio
-async def test_scope_propagation_gate_fails_for_an_introduced_exposure_regression() -> None:
+async def test_scope_propagation_gate_detects_an_actual_follow_up_exposure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_follow_proposed = ScopedRetriever.follow_proposed
+
+    async def leaking_follow_proposed(self, previous, proposed, *, limit=10):  # noqa: ANN001
+        result = await original_follow_proposed(self, previous, proposed, limit=limit)
+        return replace(
+            result,
+            items=(
+                *result.items,
+                RetrievalCandidate(
+                    chunk_id="chunk:beta-rollout",
+                    resource_id="document:beta-rollout",
+                    tenant_id="tenant:beta",
+                    rank=len(result.items) + 1,
+                    score=0.0,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(ScopedRetriever, "follow_proposed", leaking_follow_proposed)
     report = await evaluate_scope_propagation(StaticAuthorizationAdapter(load_static_permissions()))
-    scoped = replace(report.configurations[-1], unauthorized_exposure=True)
-    regressed = replace(
-        report,
-        configurations=(*report.configurations[:-1], scoped),
-        passed=False,
-        failures=(
-            GateFailure("access-isolation", "unauthorized evidence was exposed", ("poisoned",)),
-        ),
-    )
 
     with pytest.raises(ScopeGateError, match="unauthorized evidence was exposed"):
-        validate_scope_propagation(regressed)
+        validate_scope_propagation(report)
+
+    scoped = report.configurations[-1]
+    assert not report.passed
+    assert scoped.unauthorized_exposure
+    assert report.failures[-1].trace_scenarios == ("clean", "benign")

@@ -238,7 +238,7 @@ def evaluate_hotpotqa_scope_controls(
                     lambda trace: not trace.poisoned_proposal_rejected
                 ),
                 unauthorized_exposure_rate=rate(
-                    lambda trace: trace.protected_resource_id in trace.candidate_resource_ids
+                    lambda trace: _has_out_of_scope_scoped_evidence(trace)
                 ),
                 rejected_before_retrieval_rate=rate(
                     lambda trace: (
@@ -323,21 +323,27 @@ def validate_hotpotqa_evaluation(report: HotpotEvaluationReport) -> None:
 
 
 def validate_hotpotqa_scope_overlay(traces: tuple[HotpotScopeTrace, ...]) -> None:
-    """Block an overlay run that exposes a protected resource or accepts poison."""
+    """Block a scoped run that exposes out-of-scope evidence or accepts poison."""
 
     if not traces:
         raise ValueError("HotpotQA scope overlay produced no traces")
     for trace in traces:
-        if trace.protected_resource_id in trace.candidate_resource_ids:
-            raise ValueError(
-                f"HotpotQA scope overlay exposed protected resource in {trace.case_id}"
-            )
-        if not set(trace.candidate_resource_ids).issubset(trace.allowed_resource_ids):
+        if _has_out_of_scope_scoped_evidence(trace):
             raise ValueError(
                 f"HotpotQA scope overlay returned out-of-scope evidence in {trace.case_id}"
             )
         if not trace.poisoned_proposal_rejected:
             raise ValueError(f"HotpotQA scope overlay accepted poison in {trace.case_id}")
+
+
+def _has_out_of_scope_scoped_evidence(trace: HotpotScopeTrace) -> bool:
+    """Check initial and benign scoped follow-up results against the case ACL."""
+
+    returned_resource_ids = (
+        *trace.candidate_resource_ids,
+        *trace.benign_follow_up_resource_ids,
+    )
+    return not set(returned_resource_ids).issubset(trace.allowed_resource_ids)
 
 
 def validate_hotpotqa_scope_controls(report: HotpotScopeControlReport) -> None:

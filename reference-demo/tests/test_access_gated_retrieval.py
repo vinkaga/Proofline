@@ -6,7 +6,11 @@ import pytest
 
 from proofline_reference_demo.authorization import StaticAuthorizationAdapter
 from proofline_reference_demo.domain import Principal, ScopedResource
-from proofline_reference_demo.retrieval import AccessGatedBm25Retriever, DocumentChunk
+from proofline_reference_demo.retrieval import (
+    AccessGatedBm25Retriever,
+    DocumentChunk,
+    is_permitted_tenant_chunk,
+)
 from proofline_reference_demo.tracing import trace_tenant_retrieval
 
 
@@ -34,6 +38,51 @@ def retriever() -> AccessGatedBm25Retriever:
         }
     )
     return AccessGatedBm25Retriever(chunks, authorization)
+
+
+@pytest.mark.parametrize(
+    ("chunk", "tenant_id", "permitted_resource_ids", "expected"),
+    (
+        (
+            DocumentChunk("chunk:public", "document:public", None, "public", is_public=True),
+            "tenant:acme",
+            (),
+            True,
+        ),
+        (
+            DocumentChunk("chunk:acme", "document:rollout", "tenant:acme", "private"),
+            "tenant:acme",
+            ("document:rollout",),
+            True,
+        ),
+        (
+            DocumentChunk("chunk:beta", "document:rollout", "tenant:beta", "private"),
+            "tenant:acme",
+            ("document:rollout",),
+            False,
+        ),
+        (
+            DocumentChunk("chunk:secret", "document:secret", "tenant:acme", "private"),
+            "tenant:acme",
+            (),
+            False,
+        ),
+    ),
+)
+def test_tenant_chunk_permission_predicate(
+    chunk: DocumentChunk,
+    tenant_id: str,
+    permitted_resource_ids: tuple[str, ...],
+    expected: bool,
+) -> None:
+    assert (
+        is_permitted_tenant_chunk(
+            chunk,
+            tenant_id=tenant_id,
+            permitted_resource_ids=permitted_resource_ids,
+        )
+        is expected
+    )
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ post-processing convention.
 import math
 import re
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -52,6 +53,25 @@ class AccessGatedRetriever(Protocol):
     ) -> RetrievalResult: ...
 
 
+def is_permitted_tenant_chunk(
+    chunk: DocumentChunk,
+    *,
+    tenant_id: str,
+    permitted_resource_ids: Collection[str],
+) -> bool:
+    """Apply the demo's public-or-authorized-tenant retrieval policy.
+
+    The caller must resolve ``permitted_resource_ids`` from authorization before
+    using this predicate. It intentionally treats public chunks as visible to a
+    tenant-scoped request and requires both tenant and resource matches for a
+    protected chunk.
+    """
+
+    return chunk.is_public or (
+        chunk.tenant_id == tenant_id and chunk.resource_id in permitted_resource_ids
+    )
+
+
 class AccessGatedBm25Retriever:
     """Scores only chunks that authorization permitted before retrieval began."""
 
@@ -78,8 +98,11 @@ class AccessGatedBm25Retriever:
         permitted_chunks = tuple(
             chunk
             for chunk in self._chunks
-            if chunk.is_public
-            or (chunk.tenant_id == tenant_id and chunk.resource_id in scope.resource_ids)
+            if is_permitted_tenant_chunk(
+                chunk,
+                tenant_id=tenant_id,
+                permitted_resource_ids=scope.resource_ids,
+            )
         )
         return RetrievalResult(
             access_scope=scope, candidates=self._rank(query, permitted_chunks, limit)

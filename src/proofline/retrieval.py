@@ -174,6 +174,10 @@ class ScopedRetriever(Generic[ContextT, ResultT]):
                 raise TypeError("scope validator must return bool or a diagnostic rejection string")
             if not accepted:
                 raise ScopeValidationError("retrieval scope is no longer accepted by host policy")
+        # Validation may await external policy state. Recheck expiry at the
+        # dispatch boundary so a scope that expires while validation runs is
+        # never sent to the backend.
+        scope.assert_active()
         result = self._backend(query, filters=scope.filters, limit=limit)
         if inspect.isawaitable(result):
             result = await result

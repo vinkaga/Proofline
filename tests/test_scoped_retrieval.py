@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -9,6 +10,7 @@ from proofline import (
     ProposedRetrievalStep,
     RetrievalScope,
     ScopeError,
+    ScopeExpiredError,
     ScopeValidationError,
     scoped,
 )
@@ -141,3 +143,30 @@ def test_scope_validator_can_return_a_safe_diagnostic_reason() -> None:
 
     with pytest.raises(ScopeValidationError, match="policy version was revoked"):
         asyncio.run(retriever.search("first", context=None))
+
+
+def test_async_scope_validation_cannot_dispatch_an_expired_scope() -> None:
+    backend_calls: list[str] = []
+
+    async def validate_scope(scope: RetrievalScope) -> bool:  # noqa: ARG001
+        await asyncio.sleep(0.05)
+        return True
+
+    def backend(query: str, *, filters: object, limit: int) -> list[str]:  # noqa: ARG001
+        backend_calls.append(query)
+        return [query]
+
+    retriever = scoped(
+        backend,
+        resolve_scope=lambda context: RetrievalScope.root(
+            principal="user:ana",
+            filters={"resource_id": ["guide-a"]},
+            expires_at=datetime.now(timezone.utc) + timedelta(milliseconds=10),
+        ),
+        validate_scope=validate_scope,
+    )
+
+    with pytest.raises(ScopeExpiredError):
+        asyncio.run(retriever.search("first", context=None))
+
+    assert backend_calls == []

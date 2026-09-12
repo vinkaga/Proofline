@@ -317,9 +317,12 @@ The lower-level explicit scope API remains available for trees, parallel workers
 and custom policy flows, but ordinary users should not manage scope algebra. A
 host may provide `validate_scope` to recheck revocation before every retrieval
 call, and may set `max_follow_ups` on a root scope when it needs a bounded
-branch. Both controls are optional and disabled by default. A root may also
-carry immutable string `metadata` such as a trace or request ID; metadata is
-propagated unchanged and is never used to grant retrieval authority.
+branch. Scope expiry is checked again immediately before backend dispatch,
+including after an asynchronous validator returns; it does not cancel an
+already-dispatched backend call. Both controls are optional and disabled by
+default. A root may also carry immutable string `metadata` such as a trace or
+request ID; metadata is propagated unchanged and is never used to grant
+retrieval authority.
 Underneath, the wrapper targets the ordinary Python retrieval shape: a sync or
 async callable/protocol that accepts `query`, enforced `filters`, and `limit`.
 It preserves the application's document/result model rather than imposing a

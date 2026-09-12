@@ -13,6 +13,9 @@ from uuid import uuid4
 
 FilterAtom: TypeAlias = str | int | float | bool | None
 ScopeFilters: TypeAlias = Mapping[str, frozenset[FilterAtom]]
+# Metadata is intentionally distinct from FilterAtom-based authorization
+# filters: it carries only trusted string identifiers such as trace IDs and
+# request IDs and is never interpreted as authority.
 ScopeMetadata: TypeAlias = Mapping[str, str]
 
 

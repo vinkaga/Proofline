@@ -1,0 +1,30 @@
+version = 1
+revision = 3
+requires-python = ">=3.10"
+
+[[package]]
+name = "proofline"
+version = "0.1.0"
+source = { editable = "../../" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pip-licenses", specifier = ">=5.0,<6" },
+    { name = "pyright", specifier = ">=1.1.400,<2" },
+    { name = "pytest", specifier = ">=8.4,<9" },
+    { name = "pytest-cov", specifier = ">=6.2,<8" },
+    { name = "ruff", specifier = ">=0.12,<1" },
+]
+
+[[package]]
+name = "proofline-example-host"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "proofline" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "proofline", editable = "../../" }]

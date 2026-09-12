@@ -72,13 +72,29 @@ from proofline_reference_demo.scope_evaluation import (
     validate_scope_propagation,
 )
 from proofline_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
-from proofline_reference_demo.tracing import trace_tenant_retrieval
+from proofline_reference_demo.tracing import configure_otlp_tracing, trace_tenant_retrieval
 
 app = typer.Typer(
     name="proofline-reference-demo",
     help="Public-data evaluation and demonstration for Proofline.",
     no_args_is_help=True,
 )
+
+
+@app.callback()
+def configure_observability(
+    otlp_endpoint: Annotated[
+        str | None,
+        typer.Option(
+            "--otlp-endpoint",
+            help="Explicit OTLP/HTTP trace endpoint; no telemetry is configured by default.",
+        ),
+    ] = None,
+) -> None:
+    """Configure opt-in telemetry before the selected demonstration command."""
+
+    if otlp_endpoint is not None:
+        configure_otlp_tracing(otlp_endpoint)
 
 
 def _not_available(command: str, phase: int) -> None:

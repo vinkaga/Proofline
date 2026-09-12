@@ -18,6 +18,8 @@ from openfga_sdk.models.read_request_tuple_key import ReadRequestTupleKey
 
 from proofline_reference_demo.domain import AccessScope, Principal, ScopedResource
 
+_MAX_TENANT_RESOURCE_PAGES = 1_000
+
 
 class AuthorizationAdapter(Protocol):
     """The minimal authorization contract used by retrieval and agent code."""
@@ -109,7 +111,8 @@ class OpenFgaAuthorizationAdapter:
 
         resources: set[str] = set()
         continuation_token: str | None = None
-        while True:
+        seen_tokens: set[str] = set()
+        for _ in range(_MAX_TENANT_RESOURCE_PAGES):
             # The SDK consumes pagination keys from this mapping, so each request
             # needs its own options object.
             options: dict[str, int | str | dict[str, int | str]] = {"page_size": 100}
@@ -130,9 +133,16 @@ class OpenFgaAuthorizationAdapter:
                 and item.key.object is not None
                 and item.key.object.startswith(f"{self._resource_type}:")
             )
-            if not response.continuation_token:
+            next_token = response.continuation_token
+            if not next_token:
                 return resources
-            continuation_token = response.continuation_token
+            if next_token in seen_tokens:
+                raise RuntimeError(
+                    "OpenFGA repeated a continuation token while listing tenant resources"
+                )
+            seen_tokens.add(next_token)
+            continuation_token = next_token
+        raise RuntimeError("OpenFGA tenant resource pagination exceeded the page safety limit")
 
     async def check_access(
         self,

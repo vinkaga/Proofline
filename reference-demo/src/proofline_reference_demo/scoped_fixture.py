@@ -12,6 +12,7 @@ from proofline import RetrievalScope, ScopedRetriever, ScopeFilters, scoped
 from proofline_reference_demo.authorization import AuthorizationAdapter
 from proofline_reference_demo.domain import Principal, RetrievalCandidate
 from proofline_reference_demo.retrieval import AccessGatedBm25Retriever
+from proofline_reference_demo.tracing import trace_operation
 from proofline_reference_demo.vertical_slice import vertical_slice_chunks
 
 
@@ -34,9 +35,13 @@ def build_scoped_fixture(
     chunks = vertical_slice_chunks()
 
     async def resolve_scope(context: DemoRequestContext) -> RetrievalScope:
-        access_scope = await authorization.list_permitted_resources(
-            context.principal, context.tenant_id
-        )
+        with trace_operation(
+            "proofline.authorization.resolve_scope",
+            {"enduser.id": context.principal.id},
+        ):
+            access_scope = await authorization.list_permitted_resources(
+                context.principal, context.tenant_id
+            )
         return RetrievalScope.root(
             principal=context.principal.id,
             filters={

@@ -17,6 +17,30 @@ It is not a RAG framework, agent runtime, vector store, or prompt-injection
 detector. It protects retrieval calls routed through its wrapper; it does not
 secure direct backend calls or decide whether content is factually trustworthy.
 
+## Quickstart
+
+Wrap the retriever you already have. Only trusted application code creates the
+scope; queries from a model or a document cannot supply filters.
+
+```python
+from proofline import RetrievalScope, scoped
+
+
+def resolve_scope(request) -> RetrievalScope:
+    return RetrievalScope.root(
+        principal=request.user_id,
+        filters={"resource_id": request.authorized_resource_ids},
+    )
+
+
+retriever = scoped(existing_retriever.search, resolve_scope=resolve_scope)
+results = await retriever.search("rollout prerequisites", context=request)
+```
+
+For a model-proposed follow-up, parse the proposal then call
+`follow_proposed(previous_results, proposal)`. Only trusted host code may use
+`follow_up_trusted(..., narrowing_filters=...)`.
+
 ## The problem
 
 Most retrieval demos answer questions from a document collection. An
@@ -127,8 +151,22 @@ or security.
    context-bound MCP permission tool or scoped retrieval, then returns a cited
    evidence response or an explicit abstention.
 
-Framework interoperability examples and optional OpenTelemetry/Phoenix tracing
-remain planned work. They are not claimed as current capabilities.
+The repository also includes runnable custom-loop, FastAPI host, LangGraph,
+Pydantic AI, and LlamaIndex examples. Each uses the same host-controlled
+retrieval boundary.
+The reference demo emits OpenTelemetry spans for scope resolution, retrieval,
+MCP permission decisions, deterministic planner proposals, and response
+composition when configured with an explicit OTLP endpoint, such as a local
+Phoenix collector. It has no runtime model call to trace.
+
+For local trace viewing, start Phoenix with
+`docker compose --profile observability up phoenix` from `reference-demo`, then
+run a reference-demo command with
+`--otlp-endpoint http://localhost:6006/v1/traces`, for example
+`uv run proofline-reference-demo --otlp-endpoint http://localhost:6006/v1/traces
+demo-tenant-search --authorization static`. Phoenix’s UI and OTLP/HTTP collector
+share port 6006; Proofline records IDs and counts, not passage text or raw
+allowlists.
 
 ## Repository layout
 
@@ -145,12 +183,13 @@ reference-demo/                 reproducible OpenFGA/Qdrant public-data demo
   .env.example
 
 examples/README.md              design constraints for future integrations
+examples/host/                  installable shared fixture for framework examples
 ```
 
 `proofline` has only core dependencies and never reads `.env`. The reference
 demo owns OpenFGA, Qdrant, MCP, Pydantic Settings, tracing, public data, and
-evaluation. Future examples will depend only on Proofline and their selected
-host framework.
+evaluation. Each framework example depends on its selected host framework and
+the installable shared fixture package; the fixture depends on Proofline.
 
 ### Evaluation fixture
 

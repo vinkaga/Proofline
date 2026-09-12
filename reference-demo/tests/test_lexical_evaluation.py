@@ -8,6 +8,7 @@ from proofline_reference_demo.authorization import StaticAuthorizationAdapter
 from proofline_reference_demo.domain import RetrievalCandidate, ScopedResource
 from proofline_reference_demo.evaluation_data import EvaluationSuite
 from proofline_reference_demo.lexical_evaluation import (
+    _candidate_identifiers,
     evaluate_lexical_baseline,
     validate_baseline_measurement,
     write_lexical_report,
@@ -61,6 +62,18 @@ def lexical_retriever() -> AccessGatedBm25Retriever:
             }
         ),
     )
+
+
+def test_public_candidate_without_document_id_fails_relevance_grading() -> None:
+    candidate = RetrievalCandidate(
+        chunk_id="chunk:missing-document-id",
+        resource_id="document:public",
+        rank=1,
+        score=1.0,
+    )
+
+    with pytest.raises(ValueError, match="missing a document_id"):
+        _candidate_identifiers(candidate)
 
 
 @pytest.fixture

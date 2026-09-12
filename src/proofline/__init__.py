@@ -19,6 +19,8 @@ from proofline.scope import (
     ScopeExpiredError,
     ScopeFilters,
     ScopeMetadata,
+    matches_scope_filters,
+    validate_scope_filter_fields,
 )
 
 __version__ = "0.1.0"
@@ -28,6 +30,8 @@ __all__ = [
     "FilterAtom",
     "ScopeFilters",
     "ScopeMetadata",
+    "matches_scope_filters",
+    "validate_scope_filter_fields",
     "ScopeError",
     "ScopeExpiredError",
     "ScopeValidationError",

@@ -5,7 +5,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from proofline import RetrievalScope, ScopeError, ScopeExpiredError
+from proofline import (
+    RetrievalScope,
+    ScopeError,
+    ScopeExpiredError,
+    matches_scope_filters,
+    validate_scope_filter_fields,
+)
 
 
 def test_scope_filters_are_immutable() -> None:
@@ -40,6 +46,85 @@ def test_child_scope_can_only_narrow_existing_allowlists() -> None:
 
     with pytest.raises(ScopeError, match="widens"):
         root.attenuate({"resource_id": ["guide-a", "guide-c"]})
+
+
+@pytest.mark.parametrize(
+    ("parent_value", "child_value"),
+    [
+        (1, True),
+        (True, 1),
+        (1, 1.0),
+        (1.0, 1),
+    ],
+)
+def test_scope_attenuation_distinguishes_equal_values_of_different_types(
+    parent_value: int | float | bool, child_value: int | float | bool
+) -> None:
+    root = RetrievalScope.root(principal="user:ana", filters={"id": [parent_value]})
+
+    with pytest.raises(ScopeError, match="widens"):
+        root.attenuate({"id": [child_value]})
+
+
+def test_scope_rejects_equal_filter_values_with_different_types() -> None:
+    with pytest.raises(ScopeError, match="same type"):
+        RetrievalScope.root(principal="user:ana", filters={"id": [1, True]})
+
+
+def test_adapter_filter_contract_rejects_unknown_fields_and_matches_conjunctively() -> None:
+    scope = RetrievalScope.root(
+        principal="user:ana",
+        filters={"tenant_id": ["tenant:acme"], "resource_id": ["document:shared"]},
+    )
+    supported_fields = {"tenant_id", "resource_id"}
+
+    assert matches_scope_filters(
+        {"tenant_id": "tenant:acme", "resource_id": "document:shared"},
+        scope.filters,
+        supported_fields=supported_fields,
+    )
+    assert not matches_scope_filters(
+        {"tenant_id": "tenant:beta", "resource_id": "document:shared"},
+        scope.filters,
+        supported_fields=supported_fields,
+    )
+    assert not matches_scope_filters(
+        {"tenant_id": "tenant:acme", "resource_id": "document:other"},
+        scope.filters,
+        supported_fields=supported_fields,
+    )
+
+    empty_allowlist = RetrievalScope.root(principal="user:ana", filters={"resource_id": []})
+    assert not matches_scope_filters(
+        {"resource_id": "document:shared"},
+        empty_allowlist.filters,
+        supported_fields={"resource_id"},
+    )
+
+    with pytest.raises(ScopeError, match="does not support"):
+        validate_scope_filter_fields(
+            RetrievalScope.root(
+                principal="user:ana", filters={"resource_id": ["document:shared"]}
+            ).attenuate({"visibility": ["published"]}).filters,
+            supported_fields={"resource_id"},
+        )
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {1: ["guide-a"]},
+        {"id": [float("nan")]},
+        {"id": [float("inf")]},
+        {"id": [object()]},
+    ],
+)
+def test_scope_rejects_invalid_filter_atoms_or_names(filters: dict[object, list[object]]) -> None:
+    with pytest.raises(ScopeError, match="filter"):
+        RetrievalScope.root(
+            principal="user:ana",
+            filters=filters,  # type: ignore[arg-type]
+        )
 
 
 def test_scope_rejects_expiry_before_use() -> None:

@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
 """Test ACL-aware lexical evaluation independently of a source checkout."""
 
+from dataclasses import replace
+
 import pytest
 
 from proofline_reference_demo.authorization import StaticAuthorizationAdapter
@@ -108,10 +110,11 @@ def suite() -> EvaluationSuite:
                     "expected": "abstain",
                 },
                 {
-                    "id": "permission",
-                    "mode": "permission",
-                    "principal": "user:ana",
-                    "query": "Can Ana view Acme?",
+                        "id": "permission",
+                        "mode": "permission",
+                        "principal": "user:ana",
+                        "tenant": "tenant:acme",
+                        "query": "Can Ana view Acme?",
                     "relation": "viewer",
                     "resource": "document:acme-rollout",
                     "required_tool": "check_access",
@@ -144,6 +147,13 @@ async def test_evaluation_reports_ranking_latency_and_zero_exposure(
     write_lexical_traces(measurement, traces_output)
     assert len(traces_output.read_text().splitlines()) == 3
     validate_baseline_measurement(measurement)
+
+    with pytest.raises(ValueError, match="recall fell below"):
+        validate_baseline_measurement(replace(measurement, recall_at_k=0.0))
+    with pytest.raises(ValueError, match="MRR fell below"):
+        validate_baseline_measurement(replace(measurement, mrr=0.0))
+    with pytest.raises(ValueError, match="nDCG fell below"):
+        validate_baseline_measurement(replace(measurement, ndcg_at_k=0.0))
 
 
 @pytest.mark.asyncio

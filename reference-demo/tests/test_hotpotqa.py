@@ -7,9 +7,12 @@ import json
 from dataclasses import replace
 
 import pytest
+from proofline import RetrievalScope
 from typer.testing import CliRunner
 
 import proofline_reference_demo.cli as cli
+import proofline_reference_demo.hotpot_evaluation as hotpot_evaluation
+from proofline_reference_demo.domain import RetrievalCandidate
 from proofline_reference_demo.hotpot_evaluation import (
     evaluate_hotpotqa_retrieval,
     evaluate_hotpotqa_scope_controls,
@@ -24,6 +27,7 @@ from proofline_reference_demo.hotpotqa import (
     evaluate_overlay,
     load_cases,
 )
+from proofline_reference_demo.retrieval import DocumentChunk
 
 runner = CliRunner()
 
@@ -109,6 +113,11 @@ def test_verified_hotpotqa_subset_and_overlay_preserve_the_source_data(tmp_path)
     with pytest.raises(ValueError, match="did not reject before retrieval"):
         validate_hotpotqa_scope_controls(regressed)
 
+    with pytest.raises(ValueError, match="supporting-title recall"):
+        validate_hotpotqa_evaluation(replace(retrieval, supporting_title_recall_at_k=0.0))
+    with pytest.raises(ValueError, match="complete supporting-evidence coverage"):
+        validate_hotpotqa_evaluation(replace(retrieval, answer_evidence_coverage_at_k=0.0))
+
 
 def test_hotpotqa_loader_rejects_a_hash_mismatch(tmp_path) -> None:
     payload = _dataset()
@@ -117,6 +126,74 @@ def test_hotpotqa_loader_rejects_a_hash_mismatch(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
         load_cases(path, _manifest(payload))
+
+
+def test_hotpot_backend_applies_tenant_and_resource_filters_conjunctively() -> None:
+    backend = hotpot_evaluation._backend_for_chunks(
+        (
+            DocumentChunk("acme", "document:shared", "tenant:acme", "shared evidence"),
+            DocumentChunk("beta", "document:shared", "tenant:beta", "shared evidence"),
+        )
+    )
+    filters = RetrievalScope.root(
+        principal="user:benchmark",
+        filters={"tenant_id": ["tenant:acme"], "resource_id": ["document:shared"]},
+    ).filters
+
+    candidates = backend("shared", filters=filters, limit=10)
+
+    assert [candidate.chunk_id for candidate in candidates] == ["acme"]
+
+
+def test_hotpotqa_scope_gate_detects_an_actual_benign_follow_up_exposure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    payload = _dataset()
+    path = tmp_path / "hotpot.json"
+    path.write_bytes(payload)
+    cases = load_cases(path, _manifest(payload))
+    overlays = build_overlay(cases)
+    original_backend_for_chunks = hotpot_evaluation._backend_for_chunks
+
+    def leaking_backend_for_chunks(chunks):  # noqa: ANN001
+        backend = original_backend_for_chunks(chunks)
+        call_count = 0
+
+        def leaking_backend(query, *, filters, limit):  # noqa: ANN001
+            nonlocal call_count
+            call_count += 1
+            candidates = backend(query, filters=filters, limit=limit)
+            if call_count != 2:
+                return candidates
+            protected = next(
+                chunk for chunk in chunks if chunk.resource_id not in filters["resource_id"]
+            )
+            return (
+                *candidates,
+                RetrievalCandidate(
+                    chunk_id=protected.id,
+                    resource_id=protected.resource_id,
+                    tenant_id=protected.tenant_id,
+                    rank=len(candidates) + 1,
+                    score=0.0,
+                ),
+            )
+
+        return leaking_backend
+
+    monkeypatch.setattr(hotpot_evaluation, "_backend_for_chunks", leaking_backend_for_chunks)
+    traces = asyncio.run(evaluate_hotpotqa_scope_overlay(cases, overlays, limit=2))
+
+    assert traces[0].protected_resource_id in traces[0].benign_follow_up_resource_ids
+    with pytest.raises(ValueError, match="out-of-scope evidence"):
+        validate_hotpotqa_scope_overlay(traces)
+
+    controls = evaluate_hotpotqa_scope_controls(traces)
+    scoped_policy = controls.configurations[-1]
+    assert scoped_policy.unauthorized_exposure_rate == 1
+    with pytest.raises(ValueError, match="scoped policy exposed protected evidence"):
+        validate_hotpotqa_scope_controls(controls)
 
 
 def test_hotpotqa_cli_reports_all_three_controls(tmp_path) -> None:

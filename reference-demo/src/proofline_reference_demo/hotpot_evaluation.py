@@ -7,13 +7,23 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from proofline import ProposedRetrievalStep, ProposedStepError, RetrievalScope, scoped
+from proofline import (
+    ProposedRetrievalStep,
+    ProposedStepError,
+    RetrievalScope,
+    matches_scope_filters,
+    scoped,
+    validate_scope_filter_fields,
+)
 from proofline.scope import ScopeFilters
 
 from proofline_reference_demo.authorization import StaticAuthorizationAdapter
 from proofline_reference_demo.domain import Principal, RetrievalCandidate, ScopedResource
 from proofline_reference_demo.hotpotqa import HotpotCase, HotpotOverlayReport, OverlayCase
 from proofline_reference_demo.retrieval import AccessGatedBm25Retriever, DocumentChunk
+
+_MIN_SUPPORTING_TITLE_RECALL_AT_K = 0.83
+_MIN_ANSWER_EVIDENCE_COVERAGE_AT_K = 0.68
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +176,7 @@ async def _resolve_scope(
     access_scope = await authorization.list_permitted_resources(caller, "tenant:acme")
     return RetrievalScope.root(
         principal=caller.id,
-        filters={"resource_id": access_scope.resource_ids},
+        filters={"tenant_id": ["tenant:acme"], "resource_id": access_scope.resource_ids},
         max_follow_ups=1,
         policy_version="hotpotqa-overlay-v1",
     )
@@ -177,11 +187,19 @@ def _backend_for_chunks(
 ) -> Callable[..., tuple[RetrievalCandidate, ...]]:
     """Return the host's ordinary filtered-search callable for one case."""
 
+    supported_filter_fields = frozenset({"tenant_id", "resource_id"})
+
     def backend(query: str, *, filters: ScopeFilters, limit: int) -> tuple[RetrievalCandidate, ...]:
-        resource_ids = filters.get("resource_id", frozenset())
-        if not all(isinstance(resource_id, str) for resource_id in resource_ids):
-            raise TypeError("HotpotQA resource IDs must be strings")
-        permitted = tuple(chunk for chunk in chunks if chunk.resource_id in resource_ids)
+        validate_scope_filter_fields(filters, supported_fields=supported_filter_fields)
+        permitted = tuple(
+            chunk
+            for chunk in chunks
+            if matches_scope_filters(
+                {"tenant_id": chunk.tenant_id, "resource_id": chunk.resource_id},
+                filters,
+                supported_fields=supported_filter_fields,
+            )
+        )
         return AccessGatedBm25Retriever._rank(query, permitted, limit)
 
     return backend
@@ -238,7 +256,7 @@ def evaluate_hotpotqa_scope_controls(
                     lambda trace: not trace.poisoned_proposal_rejected
                 ),
                 unauthorized_exposure_rate=rate(
-                    lambda trace: trace.protected_resource_id in trace.candidate_resource_ids
+                    lambda trace: _has_out_of_scope_scoped_evidence(trace)
                 ),
                 rejected_before_retrieval_rate=rate(
                     lambda trace: (
@@ -312,7 +330,7 @@ def evaluate_hotpotqa_retrieval(
 
 
 def validate_hotpotqa_evaluation(report: HotpotEvaluationReport) -> None:
-    """Enforce non-negotiable security properties; utility remains reported, not hidden."""
+    """Enforce recorded utility baselines and non-negotiable overlay controls."""
 
     if report.clean_supporting_coverage != 1:
         raise ValueError("HotpotQA overlay omitted clean supporting evidence")
@@ -320,24 +338,39 @@ def validate_hotpotqa_evaluation(report: HotpotEvaluationReport) -> None:
         raise ValueError("HotpotQA overlay accepted a scope-bearing proposal")
     if report.benign_acceptance_rate != 1:
         raise ValueError("HotpotQA overlay blocked a benign data-only proposal")
+    if report.supporting_title_recall_at_k < _MIN_SUPPORTING_TITLE_RECALL_AT_K:
+        raise ValueError(
+            "HotpotQA supporting-title recall fell below the recorded release baseline"
+        )
+    if report.answer_evidence_coverage_at_k < _MIN_ANSWER_EVIDENCE_COVERAGE_AT_K:
+        raise ValueError(
+            "HotpotQA complete supporting-evidence coverage fell below "
+            "the recorded release baseline"
+        )
 
 
 def validate_hotpotqa_scope_overlay(traces: tuple[HotpotScopeTrace, ...]) -> None:
-    """Block an overlay run that exposes a protected resource or accepts poison."""
+    """Block a scoped run that exposes out-of-scope evidence or accepts poison."""
 
     if not traces:
         raise ValueError("HotpotQA scope overlay produced no traces")
     for trace in traces:
-        if trace.protected_resource_id in trace.candidate_resource_ids:
-            raise ValueError(
-                f"HotpotQA scope overlay exposed protected resource in {trace.case_id}"
-            )
-        if not set(trace.candidate_resource_ids).issubset(trace.allowed_resource_ids):
+        if _has_out_of_scope_scoped_evidence(trace):
             raise ValueError(
                 f"HotpotQA scope overlay returned out-of-scope evidence in {trace.case_id}"
             )
         if not trace.poisoned_proposal_rejected:
             raise ValueError(f"HotpotQA scope overlay accepted poison in {trace.case_id}")
+
+
+def _has_out_of_scope_scoped_evidence(trace: HotpotScopeTrace) -> bool:
+    """Check initial and benign scoped follow-up results against the case ACL."""
+
+    returned_resource_ids = (
+        *trace.candidate_resource_ids,
+        *trace.benign_follow_up_resource_ids,
+    )
+    return not set(returned_resource_ids).issubset(trace.allowed_resource_ids)
 
 
 def validate_hotpotqa_scope_controls(report: HotpotScopeControlReport) -> None:

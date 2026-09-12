@@ -115,7 +115,9 @@ def build_corpus(
     chunks: list[DocumentChunk] = []
     for document in manifest.documents:
         source_path = source_root / document.path
-        content = _FRONT_MATTER.sub("", source_path.read_text()).strip()
+        raw_content = source_path.read_text()
+        content = _FRONT_MATTER.sub("", raw_content).strip()
+        retrieval_context = _front_matter_retrieval_context(raw_content)
         for index, paragraph in enumerate(_PARAGRAPH.split(content), start=1):
             normalized = " ".join(paragraph.split())
             if normalized:
@@ -130,6 +132,7 @@ def build_corpus(
                             source_revision=manifest.source.revision,
                             source_url=str(document.url),
                             document_id=document.id,
+                            search_context=retrieval_context,
                         )
                     )
                 for assignment in assignments.assignments:
@@ -143,9 +146,33 @@ def build_corpus(
                                 source_revision=manifest.source.revision,
                                 source_url=str(document.url),
                                 document_id=document.id,
+                                search_context=retrieval_context,
                             )
                         )
     return tuple(chunks)
+
+
+def _front_matter_retrieval_context(raw_content: str) -> str:
+    """Return human-authored title and description for every chunk's index.
+
+    MDX titles and descriptions are provenance-bearing source metadata. Keeping
+    them with each chunk prevents chunk boundaries from hiding a document's
+    subject, particularly for short paraphrased queries.
+    """
+
+    match = _FRONT_MATTER.match(raw_content)
+    if match is None:
+        return ""
+    metadata = yaml.safe_load(
+        "\n".join(line for line in match.group().splitlines() if line.strip() != "---")
+    )
+    if not isinstance(metadata, dict):
+        return ""
+    return " ".join(
+        value.strip()
+        for key in ("title", "description")
+        if isinstance((value := metadata.get(key)), str)
+    )
 
 
 def write_corpus(chunks: tuple[DocumentChunk, ...], output: Path) -> None:

@@ -7,7 +7,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from proofline import ProposedRetrievalStep, RetrievalScope, ScopedResults, ScopedRetriever, scoped
+from proofline import (
+    ProposedRetrievalStep,
+    RetrievalScope,
+    ScopedResults,
+    ScopedRetriever,
+    matches_scope_filters,
+    scoped,
+    validate_scope_filter_fields,
+)
 from proofline.scope import ScopeFilters
 
 
@@ -32,19 +40,25 @@ _EVIDENCE = (
 def retriever() -> ScopedRetriever[TrustedRequest, Evidence]:
     """Build the common host boundary; frameworks never supply raw filters."""
 
-    def resolve(request: TrustedRequest) -> RetrievalScope:
+    def resolve(context: TrustedRequest) -> RetrievalScope:
         return RetrievalScope.root(
-            principal=request.principal,
-            filters={"resource_id": request.resource_ids},
+            principal=context.principal,
+            filters={"resource_id": context.resource_ids},
             max_follow_ups=1,
         )
 
     def search(query: str, *, filters: ScopeFilters, limit: int) -> tuple[Evidence, ...]:
+        supported_filter_fields = frozenset({"resource_id"})
+        validate_scope_filter_fields(filters, supported_fields=supported_filter_fields)
         terms = frozenset(query.lower().replace(".", "").split())
         return tuple(
             evidence
             for evidence in _EVIDENCE
-            if evidence.resource_id in filters["resource_id"]
+            if matches_scope_filters(
+                {"resource_id": evidence.resource_id},
+                filters,
+                supported_fields=supported_filter_fields,
+            )
             and terms.intersection(evidence.text.lower().replace(".", "").split())
         )[:limit]
 

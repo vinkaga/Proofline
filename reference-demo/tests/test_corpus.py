@@ -47,6 +47,7 @@ def test_build_corpus_strips_front_matter_and_preserves_provenance(tmp_path) -> 
 
     assert [chunk.id for chunk in chunks] == ["chunk:example:1", "chunk:example:2"]
     assert chunks[0].content == "First paragraph."
+    assert chunks[0].search_context == "Example"
     assert chunks[0].source_revision == "a" * 40
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Self
 
 import yaml
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from proofline_reference_demo.domain import RequestMode
 
@@ -41,8 +41,10 @@ class EvaluationCaseSpec(BaseModel):
     @model_validator(mode="after")
     def validate_mode_contract(self) -> Self:
         if self.mode is RequestMode.PERMISSION:
-            if not (self.relation and self.resource and self.required_tool):
-                raise ValueError("permission cases require relation, resource, and required_tool")
+            if not (self.tenant and self.relation and self.resource and self.required_tool):
+                raise ValueError(
+                    "permission cases require tenant, relation, resource, and required_tool"
+                )
             if self.expected not in {ExpectedOutcome.ALLOW, ExpectedOutcome.DENY}:
                 raise ValueError("permission cases must expect allow or deny")
         elif self.mode is RequestMode.TENANT_KNOWLEDGE and not self.tenant:
@@ -58,11 +60,20 @@ class EvaluationCaseSpec(BaseModel):
         return self
 
 
+class LexicalQualityGate(BaseModel):
+    """Reviewed lower bounds for one versioned lexical release suite."""
+
+    recall_at_k: float = Field(ge=0.0, le=1.0)
+    mrr: float = Field(ge=0.0, le=1.0)
+    ndcg_at_k: float = Field(ge=0.0, le=1.0)
+
+
 class EvaluationSuite(BaseModel):
     """A versioned set of reviewed cases used by later release gates."""
 
     version: str
     cases: tuple[EvaluationCaseSpec, ...]
+    lexical_quality_gate: LexicalQualityGate | None = None
 
     @model_validator(mode="after")
     def validate_unique_case_ids(self) -> Self:

@@ -25,6 +25,14 @@ jobs:
       - run: uv run pyright
       - run: uv run pytest
       - run: uv run proofline-reference-demo evaluate
+      - name: Check out the pinned documentation corpus for the release suite
+        run: |
+          git clone https://github.com/openfga/openfga.dev.git ../openfga.dev
+          git -C ../openfga.dev checkout 056865e93280715c4b1afbeae95876448218ad78
+      - run: uv run proofline-reference-demo evaluate-lexical --source-root ../openfga.dev
+      - run: docker compose up -d openfga
+      - run: until curl --fail --silent http://localhost:8080/healthz; do sleep 1; done
+      - run: uv run proofline-reference-demo evaluate-release --source-root ../openfga.dev --openfga-url http://localhost:8080
       - name: Download verified HotpotQA distractor development set
         run: |
           for url in \
@@ -37,8 +45,6 @@ jobs:
           done
           exit 1
       - run: uv run proofline-reference-demo evaluate-hotpotqa
-      - run: docker compose up -d openfga
-      - run: until curl --fail --silent http://localhost:8080/healthz; do sleep 1; done
       - run: OPENFGA_URL=http://localhost:8080 uv run pytest -m integration --no-cov
       - if: always()
         run: docker compose down --volumes

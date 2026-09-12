@@ -33,7 +33,7 @@ from proofline_reference_demo.dense_retrieval import (
     TokenHashEmbeddingProvider,
     write_dense_comparison_report,
 )
-from proofline_reference_demo.domain import AccessScope, Principal, ScopedResource
+from proofline_reference_demo.domain import Principal
 from proofline_reference_demo.evaluation_data import load_evaluation_suite
 from proofline_reference_demo.hotpot_evaluation import (
     evaluate_hotpotqa_retrieval,
@@ -63,6 +63,10 @@ from proofline_reference_demo.lexical_evaluation import (
 from proofline_reference_demo.multi_hop import run_clean_two_hop, run_poisoned_two_hop
 from proofline_reference_demo.openfga_fixture import load_static_permissions, provision_openfga
 from proofline_reference_demo.permission_mcp import build_permission_server
+from proofline_reference_demo.release_evaluation import (
+    evaluate_release_suite,
+    validate_release_evaluation,
+)
 from proofline_reference_demo.reranking import RerankingRetriever, TokenCoverageReranker
 from proofline_reference_demo.retrieval import AccessGatedBm25Retriever, RetrievalResult
 from proofline_reference_demo.retrieval_comparison import write_method_comparison_report
@@ -228,15 +232,16 @@ def evaluate_lexical(
     corpus_manifest = load_manifest(manifest)
     assignments = load_access_assignments(corpus_manifest.access_assignments)
     chunks = build_corpus(corpus_manifest, source_root, assignments)
+    suite_data = load_evaluation_suite(suite)
     measurement = asyncio.run(
         evaluate_lexical_baseline(
             AccessGatedBm25Retriever(chunks, StaticAuthorizationAdapter(load_static_permissions())),
-            load_evaluation_suite(suite),
+            suite_data,
             corpus_manifest.version,
             limit=limit,
         )
     )
-    validate_baseline_measurement(measurement)
+    validate_baseline_measurement(measurement, suite_data.lexical_quality_gate)
     write_lexical_report(measurement, output)
     write_lexical_traces(measurement, traces_output)
     typer.echo(
@@ -369,20 +374,12 @@ async def _search_through_proofline(
         query,
         context=DemoRequestContext(principal=caller, tenant_id=tenant),
     )
-    resource_ids = results.scope.filters["resource_id"]
-    typed_resource_ids = tuple(
-        resource_id for resource_id in resource_ids if isinstance(resource_id, str)
-    )
-    if len(typed_resource_ids) != len(resource_ids):
-        raise TypeError("reference-demo resource IDs must be strings")
+    # The retrieval scope also contains public-resource allowlist entries so
+    # the backend can apply all filters conjunctively. Report authorization
+    # output separately rather than mislabeling those public entries as grants.
+    access_scope = await authorization.list_permitted_resources(caller, tenant)
     return RetrievalResult(
-        access_scope=AccessScope(
-            tenant_id=tenant,
-            resources=tuple(
-                ScopedResource(tenant_id=tenant, resource_id=resource_id)
-                for resource_id in sorted(typed_resource_ids)
-            ),
-        ),
+        access_scope=access_scope,
         candidates=results.items,
     )
 
@@ -441,6 +438,47 @@ def evaluate() -> None:
     except ScopeGateError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
+
+
+@app.command("evaluate-release")
+def evaluate_release(
+    source_root: Annotated[Path, typer.Option(exists=True, file_okay=False)],
+    manifest: Annotated[Path, typer.Option(exists=True)] = Path("data/corpus/manifest.yaml"),
+    suite: Annotated[Path, typer.Option(exists=True)] = Path("data/eval/release-v0.yaml"),
+    openfga_url: Annotated[str | None, typer.Option()] = None,
+) -> None:
+    """Execute every versioned release case through the corpus-backed host."""
+
+    corpus_manifest = load_manifest(manifest)
+    chunks = build_corpus(
+        corpus_manifest, source_root, load_access_assignments(corpus_manifest.access_assignments)
+    )
+    release_suite = load_evaluation_suite(suite)
+    report = asyncio.run(_evaluate_release(chunks, release_suite, openfga_url))
+    typer.echo(json.dumps(asdict(report), indent=2))
+    try:
+        validate_release_evaluation(report)
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+
+
+async def _evaluate_release(
+    chunks: tuple,
+    suite,
+    openfga_url: str | None,
+):
+    """Use the real policy adapter for release execution when configured."""
+
+    if openfga_url is None:
+        return await evaluate_release_suite(
+            StaticAuthorizationAdapter(load_static_permissions()), chunks, suite
+        )
+    provisioned = await provision_openfga(openfga_url)
+    try:
+        return await evaluate_release_suite(provisioned.adapter, chunks, suite)
+    finally:
+        await provisioned.delete()
 
 
 @app.command("evaluate-hotpotqa")

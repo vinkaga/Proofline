@@ -2,6 +2,9 @@
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
 """Create inspectable traces for the implemented retrieval boundary."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 from opentelemetry import trace
 
 from proofline_reference_demo.domain import InteractionTrace, Principal, RequestMode
@@ -11,13 +14,16 @@ _TRACER_NAME = "proofline.reference_demo"
 _configured_endpoint: str | None = None
 
 
-def trace_operation(name: str, attributes: dict[str, str | int | bool]) -> trace.Span:
-    """Start an opt-in span without recording document text or filter values."""
+@contextmanager
+def trace_operation(
+    name: str, attributes: dict[str, str | int | bool]
+) -> Iterator[trace.Span]:
+    """Make an opt-in operation span current without recording sensitive inputs."""
 
-    span = trace.get_tracer(_TRACER_NAME).start_span(name)
-    for key, value in attributes.items():
-        span.set_attribute(key, value)
-    return span
+    with trace.get_tracer(_TRACER_NAME).start_as_current_span(name) as span:
+        for key, value in attributes.items():
+            span.set_attribute(key, value)
+        yield span
 
 
 def configure_otlp_tracing(endpoint: str) -> None:

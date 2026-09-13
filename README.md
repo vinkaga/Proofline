@@ -81,7 +81,8 @@ def resolve_scope(request) -> RetrievalScope:
 
 
 retriever = scoped(existing_retriever.search, resolve_scope=resolve_scope)
-results = await retriever.search("rollout prerequisites", context=request)
+request_retriever = await retriever.bind(request)
+results = await request_retriever.search("rollout prerequisites")
 ```
 
 The wrapped search function must accept `query`, keyword-only `filters`, and
@@ -89,9 +90,15 @@ The wrapped search function must accept `query`, keyword-only `filters`, and
 often need a small adapter because their parameter names and filter formats
 differ. See the [backend filter contract](#backend-filter-contract) below.
 
-To search again based on a model's suggestion, parse the proposal then call
+Pass `request_retriever.search` to an agent tool or application service. Every
+call uses the same trusted permissions resolved at `bind()` time; independent
+searches are not artificially recorded as a parent/child chain. Trusted
+application code can create a narrower branch with
+`request_retriever.narrow_trusted(...)`.
+
+For an explicit, audited retrieval tree, parse a model proposal and call
 `follow_proposed(previous_results, proposal)`. Proofline uses the previous
-results' scope for that search. Only trusted application code may use
+results' scope for that child search. Only trusted application code may use
 `follow_up_trusted(..., narrowing_filters=...)` to restrict it further.
 
 ## Backend filter contract
@@ -356,23 +363,24 @@ def resolve_scope(request_context: RequestContext) -> RetrievalScope:
 
 
 retriever = scoped(existing_retriever.search, resolve_scope=resolve_scope)
-results = await retriever.search(
-    "rollout prerequisites",
-    context=request_context_from_authenticated_user,
-    limit=5,
-)
+request_retriever = await retriever.bind(request_context_from_authenticated_user)
+results = await request_retriever.search("rollout prerequisites", limit=5)
 ```
 
-The lower-level explicit scope API remains available for trees, parallel workers,
-and custom policy flows, but ordinary users should not manage scope algebra. A
-host may provide `validate_scope` to recheck revocation before every retrieval
-call, and may set `max_follow_ups` on a root scope when it needs a bounded
-branch. Scope expiry is checked again immediately before backend dispatch,
-including after an asynchronous validator returns; it does not cancel an
-already-dispatched backend call. Both controls are optional and disabled by
-default. A root may also carry immutable string `metadata` such as a trace or
-request ID; metadata is propagated unchanged and is never used to grant
-retrieval authority.
+For an ordinary agent or RAG request, bind once and pass the bound retriever's
+query-only `search` method to the tool or service. Independent searches share
+that immutable authorized branch, including when they run concurrently. The
+bound handle adds no mutable run state; your backend client remains responsible
+for its own concurrency guarantees. The
+lower-level explicit-parent API remains available for trees, parallel workers,
+and custom policy flows; ordinary users should not manage scope algebra. A host
+may provide `validate_scope` to recheck revocation before every retrieval call,
+and may set `max_follow_ups` on a root scope when it needs a bounded branch.
+Scope expiry is checked again immediately before backend dispatch, including
+after an asynchronous validator returns; it does not cancel an already-dispatched
+backend call. Both controls are optional and disabled by default. A root may
+also carry immutable string `metadata` such as a trace or request ID; metadata
+is propagated unchanged and is never used to grant retrieval authority.
 Underneath, the wrapper targets the ordinary Python retrieval shape: a sync or
 async callable/protocol that accepts `query`, enforced `filters`, and `limit`.
 Synchronous callbacks run on the calling event loop. For a thread-safe blocking

@@ -86,6 +86,18 @@ class ScopedResults(Generic[ResultT]):
     scope: RetrievalScope
 
 
+class _ScopeSearcher(Protocol[ResultT]):
+    """Internal operation used by a retriever bound to an existing scope."""
+
+    async def __call__(
+        self,
+        query: str,
+        *,
+        scope: RetrievalScope,
+        limit: int,
+    ) -> ScopedResults[ResultT]: ...
+
+
 class ScopedRetriever(Generic[ContextT, ResultT]):
     """Apply a trusted scope to every retrieval call.
 
@@ -108,6 +120,24 @@ class ScopedRetriever(Generic[ContextT, ResultT]):
         self._resolve_scope = resolve_scope
         self._validate_scope = validate_scope
 
+    async def bind(self, context: ContextT) -> BoundScopedRetriever[ResultT]:
+        """Bind trusted request context to one reusable retrieval branch.
+
+        Resolve authorization once when an application begins an agent task or
+        request, then call :meth:`BoundScopedRetriever.search` for each
+        independent query. Those searches share the same immutable authority;
+        they are not fabricated into a linear parent/child chain. Trusted host
+        code may derive a narrower branch with
+        :meth:`BoundScopedRetriever.narrow_trusted`.
+        """
+
+        scope = self._resolve_scope(context)
+        if inspect.isawaitable(scope):
+            scope = await scope
+        if not isinstance(scope, RetrievalScope):
+            raise TypeError("scope resolver must return RetrievalScope")
+        return BoundScopedRetriever(self._search_under_scope, scope)
+
     async def search(
         self,
         query: str,
@@ -117,12 +147,7 @@ class ScopedRetriever(Generic[ContextT, ResultT]):
     ) -> ScopedResults[ResultT]:
         """Resolve host context once and retrieve using only its root scope."""
 
-        scope = self._resolve_scope(context)
-        if inspect.isawaitable(scope):
-            scope = await scope
-        if not isinstance(scope, RetrievalScope):
-            raise TypeError("scope resolver must return RetrievalScope")
-        return await self._search_under_scope(query, scope=scope, limit=limit)
+        return await (await self.bind(context)).search(query, limit=limit)
 
     async def follow_up(
         self,
@@ -205,6 +230,47 @@ class ScopedRetriever(Generic[ContextT, ResultT]):
         if inspect.isawaitable(result):
             result = await result
         return ScopedResults(items=tuple(result), scope=scope)
+
+
+@dataclass(frozen=True, slots=True)
+class BoundScopedRetriever(Generic[ResultT]):
+    """A retriever bound once to trusted authority for one request branch.
+
+    Instances are created by :meth:`ScopedRetriever.bind`. Their ordinary
+    ``search`` method accepts only a query and a result limit, so a model tool
+    cannot supply a principal, tenant, resource filter, or parent result. A
+    bound retriever has no mutable run state, so independent searches use the
+    same branch scope instead of creating an artificial retrieval lineage.
+    Backend concurrency remains the host's responsibility.
+    """
+
+    _search_under_scope: _ScopeSearcher[ResultT]
+    _scope: RetrievalScope
+
+    @property
+    def scope(self) -> RetrievalScope:
+        """Return the immutable authority shared by this branch."""
+
+        return self._scope
+
+    async def search(self, query: str, *, limit: int = 10) -> ScopedResults[ResultT]:
+        """Retrieve under this branch's existing trusted authority."""
+
+        return await self._search_under_scope(query, scope=self._scope, limit=limit)
+
+    def narrow_trusted(
+        self,
+        narrowing_filters: Mapping[str, Iterable[FilterAtom]] | None = None,
+    ) -> BoundScopedRetriever[ResultT]:
+        """Return a child branch with equal or narrower trusted authority.
+
+        Call this only from authentication, authorization, or other trusted
+        application code. Never derive ``narrowing_filters`` from a model or
+        retrieved document.
+        """
+
+        child_scope = self._scope.attenuate(narrowing_filters)
+        return BoundScopedRetriever(self._search_under_scope, child_scope)
 
 
 def scoped(

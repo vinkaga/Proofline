@@ -4,23 +4,40 @@
 
 from __future__ import annotations
 
-from proofline_example_host import TrustedRequest, retrieve
+from dataclasses import dataclass
+
+from proofline_example_host import RetrievalRun, TrustedRequest, retrieve, start_retrieval_run
 from pydantic_ai import Agent, RunContext
+
 
 # The host supplies its production model at ``agent.run`` time.  Tests supply
 # Pydantic AI's deterministic ``TestModel`` instead; this example never embeds
 # a testing model in application configuration.
-agent = Agent(deps_type=TrustedRequest)
+@dataclass(slots=True)
+class PydanticRunDependencies:
+    """Trusted request data and isolated host state for one ``agent.run`` call."""
+
+    request: TrustedRequest
+    retrieval_run: RetrievalRun
+
+    @classmethod
+    def from_request(cls, request: TrustedRequest) -> PydanticRunDependencies:
+        """Construct fresh state rather than sharing lineage across agent runs."""
+
+        return cls(request=request, retrieval_run=start_retrieval_run(request))
 
 
-async def retrieve_for_host(request: TrustedRequest, query: str) -> list[str]:
+agent = Agent(deps_type=PydanticRunDependencies)
+
+
+async def retrieve_for_host(deps: PydanticRunDependencies, query: str) -> list[str]:
     """The host-tested retrieval implementation used by the Pydantic AI tool."""
 
-    return [item.resource_id for item in await retrieve(request, query)]
+    return [item.resource_id for item in (await deps.retrieval_run.retrieve(query)).items]
 
 
-@agent.tool
-async def retrieve_evidence(ctx: RunContext[TrustedRequest], query: str) -> list[str]:
+@agent.tool(sequential=True)
+async def retrieve_evidence(ctx: RunContext[PydanticRunDependencies], query: str) -> list[str]:
     """Retrieve evidence using trusted agent dependencies, never tool arguments for scope."""
 
     return await retrieve_for_host(ctx.deps, query)

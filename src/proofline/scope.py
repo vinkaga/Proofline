@@ -19,7 +19,7 @@ ScopeFilters: TypeAlias = Mapping[str, frozenset[FilterAtom]]
 # request IDs and is never interpreted as authority.
 ScopeMetadata: TypeAlias = Mapping[str, str]
 ScopeCheckpoint: TypeAlias = Mapping[str, object]
-_SCOPE_CHECKPOINT_VERSION = 1
+_SCOPE_CHECKPOINT_VERSION = 2
 
 
 class _FrozenFilterValues(frozenset[FilterAtom]):
@@ -327,6 +327,7 @@ class RetrievalScope:
     follow_up_count: int = 0
     scope_id: str = field(default_factory=lambda: str(uuid4()))
     parent_scope_id: str | None = None
+    is_unrestricted: bool = False
 
     def __post_init__(self) -> None:
         if not self.principal:
@@ -339,6 +340,14 @@ class RetrievalScope:
             raise ScopeError("follow_up_count exceeds max_follow_ups")
         object.__setattr__(self, "filters", _freeze_filters(self.filters))
         object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
+        if type(self.is_unrestricted) is not bool:
+            raise ScopeError("is_unrestricted must be a boolean")
+        if not self.filters and not self.is_unrestricted:
+            raise ScopeError(
+                "authorized root scopes require filters; use RetrievalScope.unrestricted explicitly"
+            )
+        if self.is_unrestricted and self.filters:
+            raise ScopeError("unrestricted scopes cannot include filters")
 
     @classmethod
     def root(
@@ -360,6 +369,37 @@ class RetrievalScope:
             policy_version=policy_version,
             expires_at=expires_at,
             max_follow_ups=max_follow_ups,
+        )
+        scope.assert_active()
+        return scope
+
+    @classmethod
+    def unrestricted(
+        cls,
+        *,
+        principal: str,
+        metadata: Mapping[str, str] | None = None,
+        policy_version: str = "",
+        expires_at: datetime | None = None,
+        max_follow_ups: int | None = None,
+    ) -> RetrievalScope:
+        """Create an explicit unrestricted scope for a public-only backend.
+
+        Most authenticated retrieval should use :meth:`root` with constraints.
+        This factory is for the deliberate case where trusted host code has
+        decided that every document reachable through a backend is public to
+        the caller. It must not be used to represent missing authorization or
+        a caller with no grants.
+        """
+
+        scope = cls(
+            principal=principal,
+            filters=_freeze_filters({}),
+            metadata=_freeze_metadata(metadata or {}),
+            policy_version=policy_version,
+            expires_at=expires_at,
+            max_follow_ups=max_follow_ups,
+            is_unrestricted=True,
         )
         scope.assert_active()
         return scope
@@ -423,6 +463,7 @@ class RetrievalScope:
                 "follow_up_count": self.follow_up_count,
                 "scope_id": self.scope_id,
                 "parent_scope_id": self.parent_scope_id,
+                "is_unrestricted": self.is_unrestricted,
             },
         }
 
@@ -471,6 +512,7 @@ class RetrievalScope:
                     "follow_up_count",
                     "scope_id",
                     "parent_scope_id",
+                    "is_unrestricted",
                 }
             ),
         )
@@ -478,6 +520,7 @@ class RetrievalScope:
         policy_version = scope_data["policy_version"]
         scope_id = scope_data["scope_id"]
         parent_scope_id = scope_data["parent_scope_id"]
+        is_unrestricted = scope_data["is_unrestricted"]
         max_follow_ups = scope_data["max_follow_ups"]
         follow_up_count = scope_data["follow_up_count"]
         if type(principal) is not str or not principal:
@@ -496,6 +539,8 @@ class RetrievalScope:
             raise ScopeCheckpointError("scope checkpoint max_follow_ups must be an integer or null")
         if type(follow_up_count) is not int:
             raise ScopeCheckpointError("scope checkpoint follow_up_count must be an integer")
+        if type(is_unrestricted) is not bool:
+            raise ScopeCheckpointError("scope checkpoint is_unrestricted must be a boolean")
 
         try:
             scope = cls(
@@ -508,6 +553,7 @@ class RetrievalScope:
                 follow_up_count=follow_up_count,
                 scope_id=scope_id,
                 parent_scope_id=parent_scope_id,
+                is_unrestricted=is_unrestricted,
             )
         except ScopeError as error:
             raise ScopeCheckpointError(
@@ -553,6 +599,7 @@ class RetrievalScope:
             max_follow_ups=self.max_follow_ups,
             follow_up_count=self.follow_up_count + 1,
             parent_scope_id=self.scope_id,
+            is_unrestricted=self.is_unrestricted and updated_filters is None,
         )
 
     def __repr__(self) -> str:
@@ -565,7 +612,8 @@ class RetrievalScope:
             parent_scope_id = f"{self.parent_scope_id[:8]}…"
         return (
             "RetrievalScope("
-            f"principal={self.principal!r}, filters={filter_counts!r}, "
+            f"principal={self.principal!r}, is_unrestricted={self.is_unrestricted!r}, "
+            f"filters={filter_counts!r}, "
             f"metadata_keys={tuple(self.metadata)!r}, scope_id={scope_id!r}, "
             f"parent_scope_id={parent_scope_id!r})"
         )

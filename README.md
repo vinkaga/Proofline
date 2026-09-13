@@ -165,6 +165,24 @@ backend needs a public-content exception, represent that content in the trusted
 root allowlists or use a separate public retrieval path; do not bypass supplied
 filters while selecting candidates.
 
+### Access-state semantics
+
+Proofline makes the three access outcomes explicit:
+
+- `RetrievalScope.root(..., filters={...})` creates a constrained scope. An
+  empty filter mapping is rejected, so a failed authorization lookup cannot
+  accidentally become an unrestricted search.
+- A named empty allowlist, such as `{"resource_id": []}`, is deny-all for that
+  field. Backends must return no matching records.
+- `RetrievalScope.unrestricted(...)` is the only way to create a scope with no
+  filters. Use it only when trusted host code has deliberately established that
+  every document reachable through that backend is public to the caller—not
+  when authorization is missing or grants are empty.
+
+An unrestricted scope may later be narrowed. For example,
+`unrestricted_scope.attenuate({"resource_id": []})` becomes a deny-all scoped
+branch rather than retaining unrestricted access.
+
 ## The problem
 
 A document can be relevant to a question without being available to the user

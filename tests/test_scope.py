@@ -35,6 +35,34 @@ def test_scope_filters_are_immutable() -> None:
     assert scope.metadata == {"trace_id": "trace-123"}
 
 
+def test_scope_rejects_missing_authorization_constraints() -> None:
+    with pytest.raises(ScopeError, match="require filters"):
+        RetrievalScope.root(principal="user:ana", filters={})
+
+    with pytest.raises(ScopeError, match="require filters"):
+        RetrievalScope(principal="user:ana", filters={})
+
+
+def test_explicit_unrestricted_scope_and_named_empty_allowlist_have_distinct_meanings() -> None:
+    unrestricted = RetrievalScope.unrestricted(principal="service:public-search")
+
+    assert unrestricted.is_unrestricted
+    assert matches_scope_filters(
+        {"resource_id": "any-document"},
+        unrestricted.filters,
+        supported_fields={"resource_id"},
+    )
+
+    no_access = unrestricted.attenuate({"resource_id": []})
+
+    assert not no_access.is_unrestricted
+    assert not matches_scope_filters(
+        {"resource_id": "any-document"},
+        no_access.filters,
+        supported_fields={"resource_id"},
+    )
+
+
 def test_unchanged_child_reuses_validated_authority() -> None:
     root = RetrievalScope.root(
         principal="user:ana",
@@ -249,7 +277,7 @@ def test_scope_checkpoint_rejects_wrong_binding_and_malformed_payload() -> None:
             binding={"principal": "user:ana", "task_id": "task-456"},
         )
 
-    checkpoint["version"] = 2
+    checkpoint["version"] = 999
     with pytest.raises(ScopeCheckpointError, match="version"):
         RetrievalScope.from_checkpoint(
             checkpoint,
@@ -269,6 +297,19 @@ def test_scope_checkpoint_rejects_invalid_scope_fields() -> None:
             checkpoint,
             binding={"principal": "user:ana", "task_id": "task-123"},
         )
+
+
+def test_scope_checkpoint_preserves_explicit_unrestricted_state() -> None:
+    scope = RetrievalScope.unrestricted(principal="service:public-search")
+    checkpoint = scope.to_checkpoint(binding={"principal": "service:public-search"})
+
+    restored = RetrievalScope.from_checkpoint(
+        json.loads(json.dumps(checkpoint)),
+        binding={"principal": "service:public-search"},
+    )
+
+    assert restored.is_unrestricted
+    assert restored.filters == {}
 
 
 def test_scope_repr_redacts_filter_values() -> None:

@@ -7,12 +7,19 @@ from __future__ import annotations
 import inspect
 from asyncio import to_thread
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime
 from functools import wraps
 from typing import Generic, ParamSpec, Protocol, TypeVar
 
 from proofline.proposed_step import ProposedRetrievalStep
-from proofline.scope import FilterAtom, RetrievalScope, ScopeFilters
+from proofline.scope import (
+    FilterAtom,
+    RetrievalScope,
+    ScopeCheckpoint,
+    ScopeCheckpointError,
+    ScopeFilters,
+)
 
 ContextT = TypeVar("ContextT")
 ResultT = TypeVar("ResultT")
@@ -131,12 +138,43 @@ class ScopedRetriever(Generic[ContextT, ResultT]):
         :meth:`BoundScopedRetriever.narrow_trusted`.
         """
 
-        scope = self._resolve_scope(context)
-        if inspect.isawaitable(scope):
-            scope = await scope
-        if not isinstance(scope, RetrievalScope):
-            raise TypeError("scope resolver must return RetrievalScope")
-        return BoundScopedRetriever(self._search_under_scope, scope)
+        return BoundScopedRetriever(self._search_under_scope, await self._resolve(context))
+
+    async def resume(
+        self,
+        checkpoint: ScopeCheckpoint,
+        *,
+        context: ContextT,
+        binding: Mapping[str, str],
+    ) -> BoundScopedRetriever[ResultT]:
+        """Resume a trusted saved branch under the caller's current authority.
+
+        The host must supply the same stable caller/task ``binding`` used when
+        it created the checkpoint. Proofline restores the saved scope, resolves
+        the current trusted context, and rejects a saved branch that is broader
+        than current authorization. It preserves saved restrictions while
+        applying an earlier current expiry or a lower current follow-up limit.
+        """
+
+        saved_scope = RetrievalScope.from_checkpoint(checkpoint, binding=binding)
+        current_scope = await self._resolve(context)
+        current_scope.assert_active()
+        if not saved_scope.is_attenuation_of(current_scope):
+            raise ScopeCheckpointError(
+                "saved scope is broader than the caller's current authorization"
+            )
+        max_follow_ups = _minimum_optional_int(
+            saved_scope.max_follow_ups, current_scope.max_follow_ups
+        )
+        if max_follow_ups is not None and saved_scope.follow_up_count > max_follow_ups:
+            raise ScopeCheckpointError("saved scope exceeds the current follow-up limit")
+        resumed_scope = replace(
+            saved_scope,
+            expires_at=_earlier_expiry(saved_scope.expires_at, current_scope.expires_at),
+            max_follow_ups=max_follow_ups,
+        )
+        resumed_scope.assert_active()
+        return BoundScopedRetriever(self._search_under_scope, resumed_scope)
 
     async def search(
         self,
@@ -148,6 +186,14 @@ class ScopedRetriever(Generic[ContextT, ResultT]):
         """Resolve host context once and retrieve using only its root scope."""
 
         return await (await self.bind(context)).search(query, limit=limit)
+
+    async def _resolve(self, context: ContextT) -> RetrievalScope:
+        scope = self._resolve_scope(context)
+        if inspect.isawaitable(scope):
+            scope = await scope
+        if not isinstance(scope, RetrievalScope):
+            raise TypeError("scope resolver must return RetrievalScope")
+        return scope
 
     async def follow_up(
         self,
@@ -271,6 +317,36 @@ class BoundScopedRetriever(Generic[ResultT]):
 
         child_scope = self._scope.attenuate(narrowing_filters)
         return BoundScopedRetriever(self._search_under_scope, child_scope)
+
+    def to_checkpoint(self, *, binding: Mapping[str, str]) -> dict[str, object]:
+        """Serialize this branch's authority for trusted host checkpoint storage.
+
+        Retrieved documents are deliberately excluded. Resume with
+        :meth:`ScopedRetriever.resume` so current authorization is checked
+        before this branch can search again.
+        """
+
+        return self._scope.to_checkpoint(binding=binding)
+
+
+def _minimum_optional_int(left: int | None, right: int | None) -> int | None:
+    """Return the stricter of two optional numeric limits."""
+
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return min(left, right)
+
+
+def _earlier_expiry(left: datetime | None, right: datetime | None) -> datetime | None:
+    """Return the stricter optional expiry without treating ``None`` as a date."""
+
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return min(left, right)
 
 
 def scoped(

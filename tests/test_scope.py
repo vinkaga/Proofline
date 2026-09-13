@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
 
+import json
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
@@ -10,6 +11,7 @@ import proofline.scope as scope_module
 from proofline import (
     FilterAtom,
     RetrievalScope,
+    ScopeCheckpointError,
     ScopeError,
     ScopeExpiredError,
     matches_scope_filters,
@@ -212,6 +214,61 @@ def test_scope_can_limit_follow_up_hops() -> None:
     assert child.follow_up_count == 1
     with pytest.raises(ScopeError, match="budget"):
         child.attenuate()
+
+
+def test_scope_checkpoint_round_trips_json_safe_authority_and_lineage() -> None:
+    root = RetrievalScope.root(
+        principal="user:ana",
+        filters={"resource_id": ["guide-a", 3, 2.5, False, None]},
+        metadata={"trace_id": "trace-123"},
+        policy_version="policy-v7",
+        expires_at=datetime(2030, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
+        max_follow_ups=2,
+    )
+    child = root.attenuate()
+
+    checkpoint = child.to_checkpoint(binding={"principal": "user:ana", "task_id": "task-123"})
+    restored = RetrievalScope.from_checkpoint(
+        json.loads(json.dumps(checkpoint)),
+        binding={"principal": "user:ana", "task_id": "task-123"},
+    )
+
+    assert restored == child
+    assert restored.filters["resource_id"] == frozenset({"guide-a", 3, 2.5, False, None})
+    assert restored.parent_scope_id == root.scope_id
+    assert restored.follow_up_count == 1
+
+
+def test_scope_checkpoint_rejects_wrong_binding_and_malformed_payload() -> None:
+    scope = RetrievalScope.root(principal="user:ana", filters={"resource_id": ["guide-a"]})
+    checkpoint = scope.to_checkpoint(binding={"principal": "user:ana", "task_id": "task-123"})
+
+    with pytest.raises(ScopeCheckpointError, match="binding"):
+        RetrievalScope.from_checkpoint(
+            checkpoint,
+            binding={"principal": "user:ana", "task_id": "task-456"},
+        )
+
+    checkpoint["version"] = 2
+    with pytest.raises(ScopeCheckpointError, match="version"):
+        RetrievalScope.from_checkpoint(
+            checkpoint,
+            binding={"principal": "user:ana", "task_id": "task-123"},
+        )
+
+
+def test_scope_checkpoint_rejects_invalid_scope_fields() -> None:
+    scope = RetrievalScope.root(principal="user:ana", filters={"resource_id": ["guide-a"]})
+    checkpoint = scope.to_checkpoint(binding={"principal": "user:ana", "task_id": "task-123"})
+    checkpoint_scope = checkpoint["scope"]
+    assert isinstance(checkpoint_scope, dict)
+    checkpoint_scope["filters"] = {"": []}
+
+    with pytest.raises(ScopeCheckpointError, match="invalid scope"):
+        RetrievalScope.from_checkpoint(
+            checkpoint,
+            binding={"principal": "user:ana", "task_id": "task-123"},
+        )
 
 
 def test_scope_repr_redacts_filter_values() -> None:

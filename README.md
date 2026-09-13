@@ -101,6 +101,36 @@ For an explicit, audited retrieval tree, parse a model proposal and call
 results' scope for that child search. Only trusted application code may use
 `follow_up_trusted(..., narrowing_filters=...)` to restrict it further.
 
+### Checkpoint and resume a retrieval branch
+
+Persist a branch's authority separately from retrieved documents. Supply a
+stable, trusted binding that identifies the authenticated caller and the agent
+task; do not derive it from model or client input.
+
+```python
+binding = {"principal": request.user_id, "task_id": task.id}
+checkpoint = request_retriever.to_checkpoint(binding=binding)
+
+# Later, after loading the checkpoint from trusted host storage:
+request_retriever = await retriever.resume(
+    checkpoint,
+    context=request,
+    binding=binding,
+)
+results = await request_retriever.search("continue the investigation")
+```
+
+Checkpoints are versioned JSON-safe data, not bearer credentials. On resume,
+Proofline checks the binding, resolves the caller's current authorization, and
+rejects a saved branch that is broader than current access. It also preserves
+the saved branch's restrictions while applying any earlier current expiry or
+lower current follow-up limit. Store checkpoints where the caller cannot alter
+them; a model, browser client, or retrieved document must never supply one.
+
+The [LangGraph example](examples/langgraph/) shows this contract in graph state:
+it checkpoints scope data rather than `ScopedResults` or retrieved documents,
+then restores the branch before its follow-up node searches.
+
 ## Backend filter contract
 
 Proofline supplies the filters; the backend is responsible for applying them.

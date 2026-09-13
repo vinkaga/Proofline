@@ -600,9 +600,10 @@ def evaluate_hotpotqa(
 
     benchmark = load_hotpotqa_manifest(manifest)
     cases = load_hotpotqa_cases(dataset, benchmark)
-    overlay = evaluate_overlay(cases, build_overlay(cases), benchmark.source.sha256)
+    overlays = build_overlay(cases, benchmark.overlay)
+    overlay = evaluate_overlay(cases, overlays, benchmark.source.sha256)
     report = evaluate_hotpotqa_retrieval(cases, overlay)
-    scope_traces = asyncio.run(evaluate_hotpotqa_scope_overlay(cases, build_overlay(cases)))
+    scope_traces = asyncio.run(evaluate_hotpotqa_scope_overlay(cases, overlays))
     controls = evaluate_hotpotqa_scope_controls(scope_traces)
     typer.echo(
         json.dumps(

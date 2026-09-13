@@ -71,6 +71,15 @@ def _manifest(payload: bytes) -> HotpotManifest:
                 "supporting_title_recall_at_k": 1.0,
                 "answer_evidence_coverage_at_k": 1.0,
             },
+            "overlay": {
+                "version": "hotpotqa-overlay-v1",
+                "caller_tenant": "tenant:acme",
+                "protected_tenant": "tenant:beta",
+                "allowed_resource_assignment": "supporting-title-resources",
+                "protected_resource_assignment": "first-non-supporting-context-resource",
+                "poisoned_proposal": "query-plus-resource_id",
+                "benign_proposal": "query-only",
+            },
         }
     )
 
@@ -80,21 +89,22 @@ def test_verified_hotpotqa_subset_and_overlay_preserve_the_source_data(tmp_path)
     path = tmp_path / "hotpot.json"
     path.write_bytes(payload)
     cases = load_cases(path, _manifest(payload))
-    overlays = build_overlay(cases)
+    overlays = build_overlay(cases, _manifest(payload).overlay)
     report = evaluate_overlay(cases, overlays, hashlib.sha256(payload).hexdigest())
     retrieval = evaluate_hotpotqa_retrieval(cases, report, limit=2)
 
     assert cases[0].case_id == "b"
     assert cases[0].supporting_titles == {"Evidence"}
     assert overlays[0].poisoned_proposal["resource_id"] == "hotpot:b:1"
-    assert report.clean_supporting_coverage == 1
-    assert report.poisoned_rejection_rate == 1
-    assert report.benign_acceptance_rate == 1
+    assert report.case_count == 1
     assert retrieval.supporting_title_recall_at_k == 1
     assert retrieval.answer_evidence_coverage_at_k == 1
     validate_hotpotqa_evaluation(retrieval, _manifest(payload).retrieval_quality_gate)
     scope_traces = asyncio.run(evaluate_hotpotqa_scope_overlay(cases, overlays, limit=2))
     assert scope_traces[0].candidate_resource_ids == ("hotpot:b:0",)
+    assert scope_traces[0].insecure_follow_up_resource_ids == ("hotpot:b:1",)
+    assert scope_traces[0].insecure_scope_input_accepted
+    assert scope_traces[0].acl_only_scope_input_accepted
     assert scope_traces[0].poisoned_proposal_rejected
     validate_hotpotqa_scope_overlay(scope_traces)
     controls = evaluate_hotpotqa_scope_controls(scope_traces)
@@ -162,7 +172,9 @@ def test_hotpotqa_utility_gate_rejects_an_actual_ranking_regression(
     path = tmp_path / "hotpot.json"
     path.write_bytes(payload)
     cases = load_cases(path, _manifest(payload))
-    overlay = evaluate_overlay(cases, build_overlay(cases), hashlib.sha256(payload).hexdigest())
+    overlay = evaluate_overlay(
+        cases, build_overlay(cases, _manifest(payload).overlay), hashlib.sha256(payload).hexdigest()
+    )
 
     monkeypatch.setattr(
         hotpot_evaluation.AccessGatedBm25Retriever,
@@ -184,7 +196,7 @@ def test_hotpotqa_scope_gate_detects_an_actual_benign_follow_up_exposure(
     path = tmp_path / "hotpot.json"
     path.write_bytes(payload)
     cases = load_cases(path, _manifest(payload))
-    overlays = build_overlay(cases)
+    overlays = build_overlay(cases, _manifest(payload).overlay)
     original_backend_for_chunks = hotpot_evaluation._backend_for_chunks
 
     def leaking_backend_for_chunks(chunks):  # noqa: ANN001
@@ -227,6 +239,31 @@ def test_hotpotqa_scope_gate_detects_an_actual_benign_follow_up_exposure(
         validate_hotpotqa_scope_controls(controls)
 
 
+def test_hotpotqa_control_metrics_follow_executed_insecure_results(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    payload = _dataset()
+    path = tmp_path / "hotpot.json"
+    path.write_bytes(payload)
+    cases = load_cases(path, _manifest(payload))
+    overlays = build_overlay(cases, _manifest(payload).overlay)
+
+    monkeypatch.setattr(
+        hotpot_evaluation,
+        "_follow_insecure",
+        lambda chunks, proposal, limit: (False, ()),
+    )
+    traces = asyncio.run(evaluate_hotpotqa_scope_overlay(cases, overlays, limit=2))
+    controls = evaluate_hotpotqa_scope_controls(traces)
+    insecure = controls.configurations[0]
+
+    assert insecure.scope_bearing_input_acceptance_rate == 0
+    assert insecure.unauthorized_exposure_rate == 0
+    with pytest.raises(ValueError, match="did not expose protected evidence"):
+        validate_hotpotqa_scope_controls(controls)
+
+
 def test_hotpotqa_cli_reports_all_three_controls(tmp_path) -> None:
     payload = _dataset()
     dataset = tmp_path / "hotpot.json"
@@ -248,6 +285,14 @@ def test_hotpotqa_cli_reports_all_three_controls(tmp_path) -> None:
                 "retrieval_quality_gate:",
                 "  supporting_title_recall_at_k: 1.0",
                 "  answer_evidence_coverage_at_k: 1.0",
+                "overlay:",
+                "  version: hotpotqa-overlay-v1",
+                "  caller_tenant: tenant:acme",
+                "  protected_tenant: tenant:beta",
+                "  allowed_resource_assignment: supporting-title-resources",
+                "  protected_resource_assignment: first-non-supporting-context-resource",
+                "  poisoned_proposal: query-plus-resource_id",
+                "  benign_proposal: query-only",
             )
         )
     )

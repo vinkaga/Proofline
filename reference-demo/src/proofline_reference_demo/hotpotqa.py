@@ -8,9 +8,9 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import yaml
-from proofline import ProposedRetrievalStep, ProposedStepError
 from pydantic import BaseModel, Field
 
 
@@ -39,6 +39,18 @@ class HotpotRetrievalQualityGate(BaseModel):
     answer_evidence_coverage_at_k: float = Field(ge=0.0, le=1.0)
 
 
+class HotpotOverlaySpec(BaseModel):
+    """Versioned synthetic authorization policy applied after source verification."""
+
+    version: Literal["hotpotqa-overlay-v1"]
+    caller_tenant: Literal["tenant:acme"]
+    protected_tenant: Literal["tenant:beta"]
+    allowed_resource_assignment: Literal["supporting-title-resources"]
+    protected_resource_assignment: Literal["first-non-supporting-context-resource"]
+    poisoned_proposal: Literal["query-plus-resource_id"]
+    benign_proposal: Literal["query-only"]
+
+
 class HotpotManifest(BaseModel):
     """Versioned contract for the downloaded HotpotQA input."""
 
@@ -46,6 +58,7 @@ class HotpotManifest(BaseModel):
     source: HotpotSource
     subset: HotpotSubset
     retrieval_quality_gate: HotpotRetrievalQualityGate
+    overlay: HotpotOverlaySpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +77,9 @@ class OverlayCase:
     """Synthetic authorization data, deliberately separate from HotpotQA."""
 
     case_id: str
+    policy_version: str
+    caller_tenant: str
+    protected_tenant: str
     allowed_resource_ids: tuple[str, ...]
     protected_resource_id: str
     poisoned_proposal: dict[str, str]
@@ -72,13 +88,10 @@ class OverlayCase:
 
 @dataclass(frozen=True, slots=True)
 class HotpotOverlayReport:
-    """Deterministic structural checks for the benchmark/security composition."""
+    """Verified structural identity for a separately measured runtime overlay."""
 
     dataset_sha256: str
     case_count: int
-    clean_supporting_coverage: float
-    poisoned_rejection_rate: float
-    benign_acceptance_rate: float
 
 
 def load_manifest(path: Path) -> HotpotManifest:
@@ -109,18 +122,34 @@ def load_cases(dataset: Path, manifest: HotpotManifest) -> tuple[HotpotCase, ...
     return selected
 
 
-def build_overlay(cases: tuple[HotpotCase, ...]) -> tuple[OverlayCase, ...]:
+def build_overlay(
+    cases: tuple[HotpotCase, ...], overlay_spec: HotpotOverlaySpec
+) -> tuple[OverlayCase, ...]:
     """Assign synthetic authority without changing source questions or passages."""
+
+    if (
+        overlay_spec.allowed_resource_assignment != "supporting-title-resources"
+        or overlay_spec.protected_resource_assignment
+        != "first-non-supporting-context-resource"
+        or overlay_spec.poisoned_proposal != "query-plus-resource_id"
+        or overlay_spec.benign_proposal != "query-only"
+    ):
+        raise ValueError("unsupported HotpotQA overlay policy")
 
     overlays: list[OverlayCase] = []
     for case in cases:
         resources = tuple(f"hotpot:{case.case_id}:{index}" for index, _ in enumerate(case.contexts))
         title_to_resource = dict(zip((title for title, _ in case.contexts), resources, strict=True))
         allowed = tuple(title_to_resource[title] for title in sorted(case.supporting_titles))
-        protected = next(resource for resource in resources if resource not in allowed)
+        protected = next((resource for resource in resources if resource not in allowed), None)
+        if protected is None:
+            raise ValueError(f"HotpotQA case {case.case_id} has no non-supporting context")
         overlays.append(
             OverlayCase(
                 case_id=case.case_id,
+                policy_version=overlay_spec.version,
+                caller_tenant=overlay_spec.caller_tenant,
+                protected_tenant=overlay_spec.protected_tenant,
                 allowed_resource_ids=allowed,
                 protected_resource_id=protected,
                 poisoned_proposal={"query": case.question, "resource_id": protected},
@@ -135,27 +164,41 @@ def evaluate_overlay(
     overlays: tuple[OverlayCase, ...],
     sha256: str,
 ) -> HotpotOverlayReport:
-    """Verify clean evidence availability and planner-input boundary behavior."""
+    """Verify overlay structure; runtime control behavior is measured separately."""
 
     if len(cases) != len(overlays):
         raise ValueError("HotpotQA cases and authorization overlay must have equal length")
-    clean = sum(bool(overlay.allowed_resource_ids) for overlay in overlays)
-    rejected = 0
-    accepted = 0
-    for overlay in overlays:
-        try:
-            ProposedRetrievalStep.from_untrusted(overlay.poisoned_proposal)
-        except ProposedStepError:
-            rejected += 1
-        ProposedRetrievalStep.from_untrusted(overlay.benign_proposal)
-        accepted += 1
-    count = len(overlays)
+    for case, overlay in zip(cases, overlays, strict=True):
+        resource_ids = tuple(
+            f"hotpot:{case.case_id}:{index}" for index, _ in enumerate(case.contexts)
+        )
+        titles = dict(zip((title for title, _ in case.contexts), resource_ids, strict=True))
+        expected_allowed = tuple(titles[title] for title in sorted(case.supporting_titles))
+        if (
+            overlay.case_id != case.case_id
+            or overlay.allowed_resource_ids != expected_allowed
+            or overlay.policy_version != "hotpotqa-overlay-v1"
+            or overlay.caller_tenant != "tenant:acme"
+            or overlay.protected_tenant != "tenant:beta"
+        ):
+            raise ValueError(
+                f"HotpotQA overlay does not preserve supporting resources for {case.case_id}"
+            )
+        if (
+            overlay.protected_resource_id not in resource_ids
+            or overlay.protected_resource_id in expected_allowed
+        ):
+            raise ValueError(f"HotpotQA overlay protected a supporting resource for {case.case_id}")
+        if overlay.poisoned_proposal != {
+            "query": case.question,
+            "resource_id": overlay.protected_resource_id,
+        }:
+            raise ValueError(f"HotpotQA overlay poison target is inconsistent for {case.case_id}")
+        if overlay.benign_proposal != {"query": case.question}:
+            raise ValueError(f"HotpotQA overlay benign proposal is inconsistent for {case.case_id}")
     return HotpotOverlayReport(
         dataset_sha256=sha256,
-        case_count=count,
-        clean_supporting_coverage=clean / count,
-        poisoned_rejection_rate=rejected / count,
-        benign_acceptance_rate=accepted / count,
+        case_count=len(cases),
     )
 
 

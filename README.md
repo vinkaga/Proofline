@@ -3,27 +3,71 @@
 
 # Proofline
 
-Capability-attenuating retrieval for permission-preserving multi-hop RAG.
+Keep your RAG app's searches within the data each user is allowed to access.
 
-Proofline prevents a multi-hop RAG planner from expanding retrieval authority through retrieved content, while preserving ordinary authorized follow-up retrieval.
+Your RAG app may search a shared document collection, but each user should only
+receive information from documents they're allowed to read. If an agent runs
+additional searches to answer a question, those searches need the same access
+restrictions.
 
-Proofline is a small Python library that wraps an application's existing
-retriever. Trusted application code supplies the caller context; on every
-retrieval hop, Proofline derives and applies the corresponding authorization
-filters. The model and retrieved documents may propose a query, but cannot
-broaden who, where, or what that query may retrieve.
+Proofline automatically passes your application's permission filters to every
+search through its wrapper, including agent follow-ups. You keep your existing
+retriever.
 
-It is not a RAG framework, agent runtime, vector store, or prompt-injection
-detector. It protects retrieval calls routed through its wrapper; it does not
-secure direct backend calls or decide whether content is factually trustworthy.
+It is a small, MIT-licensed Python library. The permitted tenants, projects, or
+document IDs, together with the caller's identity, form a **retrieval scope**.
+
+## What you get
+
+- Permission filters supplied to every search through the wrapper, including
+  follow-ups, so you do not have to pass them along manually at each step.
+- Follow-ups that keep the previous search's access limits. Your application
+  can narrow those limits, but a model or retrieved document cannot widen them.
+- A wrapper around your existing retriever, with your framework and document
+  types unchanged.
+
+Your application still identifies the user and decides what they may access.
+Your retrieval backend must enforce the filters Proofline supplies. The model
+can suggest a search query; it cannot choose whose permissions to use.
+
+Proofline is useful when your RAG app or agent searches data with different
+access rules for different users or tasks. It protects calls made through its
+wrapper; it does not secure direct backend calls, detect prompt injection, or
+decide whether retrieved content is trustworthy.
+
+### Comparison with access filtering alone
+
+The following results come from the
+[50-case benchmark with synthetic permissions and search proposals](reference-demo/benchmark-results/hotpotqa-distractor-dev-v1/bm25-k5-scope-overlay-v1.md).
+Higher is better in every row. These are fixture results, not general attack
+success rates. ACL filtering means applying access-control rules to each search.
+
+| Measure | Intentionally insecure control | ACL filtering on every hop | Proofline |
+| --- | ---: | ---: | ---: |
+| Cases where no unauthorized evidence was exposed | 0% | 100% | 100% |
+| Proposals containing permission-setting fields rejected before search | 0% | 0% | 100% |
+| Follow-ups with a complete record of inherited access restrictions | 0% | 0% | 100% |
+
+Permission-setting fields include a caller identity, tenant, or resource filter.
+These must come from trusted application code. The rejection measure applies
+only to proposals containing those forbidden fields; ordinary query-only
+proposals remain accepted in the Proofline fixture.
+
+Both ACL filtering on every hop and Proofline prevent unauthorized evidence
+exposure in this fixture. Proofline also rejects invalid proposals before
+search and records how each follow-up inherits its access restrictions. These
+are additional enforcement and traceability properties, not a measured reduction
+in exposure compared with the ACL-filtered control.
 
 ## Quickstart
 
 From a repository checkout, install the core development environment with
-`uv sync`. Wrap an adapter that implements Proofline's `query`, keyword-only
-`filters`, and `limit` contract; framework retrievers often need a small adapter
-because their parameter names and filter formats differ. Only trusted application
-code creates the scope; queries from a model or a document cannot supply filters.
+`uv sync`.
+
+In this example, your application has already authenticated the user and resolved
+the document IDs they may access. `request.authorized_resource_ids` comes from
+that trusted authorization step, not from user input or a model response.
+`resolve_scope` packages those permissions for Proofline:
 
 ```python
 from proofline import RetrievalScope, scoped
@@ -40,15 +84,22 @@ retriever = scoped(existing_retriever.search, resolve_scope=resolve_scope)
 results = await retriever.search("rollout prerequisites", context=request)
 ```
 
-For a model-proposed follow-up, parse the proposal then call
-`follow_proposed(previous_results, proposal)`. Only trusted host code may use
-`follow_up_trusted(..., narrowing_filters=...)`.
+The wrapped search function must accept `query`, keyword-only `filters`, and
+`limit`, and enforce the filters before returning results. Framework retrievers
+often need a small adapter because their parameter names and filter formats
+differ. See the [backend filter contract](#backend-filter-contract) below.
+
+To search again based on a model's suggestion, parse the proposal then call
+`follow_proposed(previous_results, proposal)`. Proofline uses the previous
+results' scope for that search. Only trusted application code may use
+`follow_up_trusted(..., narrowing_filters=...)` to restrict it further.
 
 ## Backend filter contract
 
-The wrapped backend is part of the authorization boundary. It must reject
-fields it has not implemented and match every supplied field conjunctively;
-an empty allowlist must match nothing. `validate_scope_filter_fields` and
+Proofline supplies the filters; the backend is responsible for applying them.
+It must reject filter fields it does not support, require every supplied field
+to match, and return no matches for an empty list of permitted values.
+`validate_scope_filter_fields` and
 `matches_scope_filters` provide this contract for adapters whose candidate
 metadata can be represented as scalar fields:
 
@@ -79,23 +130,19 @@ filters while selecting candidates.
 
 ## The problem
 
-Most retrieval demos answer questions from a document collection. An
-enterprise assistant has a harder contract: it must find the right evidence,
-enforce what the caller is allowed to see or do, use authoritative systems for
-decisions, and make regressions visible before release.
+A document can be relevant to a question without being available to the user
+asking it. Access restrictions must apply whenever an assistant searches,
+including when it follows a reference in a document or asks a second question.
 
-Proofline is a small, inspectable reference system for that contract. It is
-not a general-purpose chatbot or a benchmark for model intelligence.
+Proofline centralizes the work of carrying those restrictions between retrieval
+steps. A follow-up receives the same or narrower scope as its parent. Switching
+to a broader scope requires a separate authorization operation in trusted
+application code.
 
-Its defining invariant is:
-
-> Retrieval provides evidence. An authorization service decides what a
-> principal may retrieve or do. The assistant cannot override either boundary.
-
-Its defining scope-propagation rule is:
-
-> Retrieved content may provide evidence, but it cannot implicitly expand the
-> caller's retrieval authority.
+The repository's reference demonstration also explores evidence quality,
+authoritative permission decisions, and regression testing. Those experiments
+support the library; they do not make it a chatbot or a benchmark for model
+intelligence.
 
 ## Reference demonstration
 
@@ -458,6 +505,9 @@ overlay without modifying the questions or passages. It is not an answer
 accuracy or universal poisoning claim. The
 [versioned result report](reference-demo/benchmark-results/hotpotqa-distractor-dev-v1/bm25-k5-scope-overlay-v1.md)
 records its exact data hash, configuration, and control comparison.
+
+See the [comparison with access filtering alone](#comparison-with-access-filtering-alone)
+near the top of this README for the reported results.
 
 To reproduce the public-data gate locally, download the artifact named by its
 manifest, then run the evaluator; it verifies the recorded SHA-256 before

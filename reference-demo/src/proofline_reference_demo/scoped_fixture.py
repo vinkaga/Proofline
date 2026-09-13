@@ -4,19 +4,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from proofline import (
     RetrievalScope,
     ScopedRetriever,
     ScopeFilters,
+    ScopeResolver,
     matches_scope_filters,
     scoped,
     validate_scope_filter_fields,
 )
 
 from proofline_reference_demo.authorization import AuthorizationAdapter
+from proofline_reference_demo.dense_retrieval import QdrantDenseRetriever
 from proofline_reference_demo.domain import Principal, RetrievalCandidate
 from proofline_reference_demo.retrieval import AccessGatedBm25Retriever, DocumentChunk
 from proofline_reference_demo.tracing import trace_operation
@@ -62,29 +64,12 @@ def build_scoped_retriever(
     """Wrap a corpus backend with the reference adapter's full filter contract."""
 
     supported_filter_fields = frozenset({"tenant_id", "resource_id"})
-
-    async def resolve_scope(context: DemoRequestContext) -> RetrievalScope:
-        with trace_operation(
-            "proofline.authorization.resolve_scope",
-            {"enduser.id": context.principal.id, "proofline.tenant_id": context.tenant_id},
-        ):
-            access_scope = await authorization.list_permitted_resources(
-                context.principal, context.tenant_id
-            )
-        return RetrievalScope.root(
-            principal=context.principal.id,
-            filters={
-                # Public chunks are included as explicit allowlist entries,
-                # rather than bypassing the scope's conjunctive filters.
-                "tenant_id": [None, context.tenant_id],
-                "resource_id": [
-                    *access_scope.resource_ids,
-                    *(chunk.resource_id for chunk in chunks if chunk.is_public),
-                ],
-            },
-            policy_version="reference-demo",
-            max_follow_ups=max_follow_ups,
-        )
+    resolve_scope = _scope_resolver(
+        authorization,
+        public_resource_ids=(chunk.resource_id for chunk in chunks if chunk.is_public),
+        public_tenant_id=None,
+        max_follow_ups=max_follow_ups,
+    )
 
     async def search(
         query: str,
@@ -107,3 +92,65 @@ def build_scoped_retriever(
         return (ranker or AccessGatedBm25Retriever._rank)(query, permitted_chunks, limit)
 
     return scoped(search, resolve_scope=resolve_scope)
+
+
+def build_scoped_qdrant_retriever(
+    dense_retriever: QdrantDenseRetriever,
+    authorization: AuthorizationAdapter,
+    *,
+    public_resource_ids: Iterable[str],
+    max_follow_ups: int | None = None,
+) -> ScopedRetriever[DemoRequestContext, RetrievalCandidate]:
+    """Wrap the Qdrant adapter with the same trusted scope-resolution boundary.
+
+    Qdrant stores public chunks with an empty-string ``tenant_id`` payload,
+    while the in-memory fixture represents that value as ``None``. Both paths
+    resolve the same resource grants, then hand the complete conjunctive scope
+    to their backend through Proofline's public ``FilteredSearch`` contract.
+    """
+
+    resolve_scope = _scope_resolver(
+        authorization,
+        public_resource_ids=public_resource_ids,
+        public_tenant_id="",
+        max_follow_ups=max_follow_ups,
+    )
+    return scoped(dense_retriever.search, resolve_scope=resolve_scope)
+
+
+def _scope_resolver(
+    authorization: AuthorizationAdapter,
+    *,
+    public_resource_ids: Iterable[str],
+    public_tenant_id: str | None,
+    max_follow_ups: int | None,
+) -> ScopeResolver[DemoRequestContext]:
+    """Build trusted scope resolution shared by in-memory and Qdrant adapters."""
+
+    if isinstance(public_resource_ids, str):
+        raise ValueError("public_resource_ids must be an iterable of resource IDs, not a string")
+    public_ids = tuple(public_resource_ids)
+    if any(not isinstance(resource_id, str) or not resource_id for resource_id in public_ids):
+        raise ValueError("public_resource_ids must contain non-empty strings")
+
+    async def resolve_scope(context: DemoRequestContext) -> RetrievalScope:
+        with trace_operation(
+            "proofline.authorization.resolve_scope",
+            {"enduser.id": context.principal.id, "proofline.tenant_id": context.tenant_id},
+        ):
+            access_scope = await authorization.list_permitted_resources(
+                context.principal, context.tenant_id
+            )
+        return RetrievalScope.root(
+            principal=context.principal.id,
+            filters={
+                # Public chunks remain ordinary allowlist entries; neither
+                # backend receives an authorization-bypassing public path.
+                "tenant_id": [public_tenant_id, context.tenant_id],
+                "resource_id": [*access_scope.resource_ids, *public_ids],
+            },
+            policy_version="reference-demo",
+            max_follow_ups=max_follow_ups,
+        )
+
+    return resolve_scope

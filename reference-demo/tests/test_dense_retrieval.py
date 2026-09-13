@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
 """Prove Qdrant filters protected points before dense candidates are returned."""
 
+import asyncio
 import json
 import warnings
 from email.message import Message
@@ -9,6 +10,7 @@ from io import BytesIO
 from urllib.error import HTTPError
 
 import pytest
+from proofline import ScopeError
 from qdrant_client import QdrantClient
 
 import proofline_reference_demo.dense_retrieval as dense_retrieval
@@ -21,6 +23,10 @@ from proofline_reference_demo.dense_retrieval import (
 )
 from proofline_reference_demo.domain import Principal, ScopedResource
 from proofline_reference_demo.retrieval import DocumentChunk
+from proofline_reference_demo.scoped_fixture import (
+    DemoRequestContext,
+    build_scoped_qdrant_retriever,
+)
 
 
 @pytest.fixture
@@ -98,6 +104,109 @@ async def test_dense_public_search_returns_only_public_chunks(
     result = await dense_retriever.search_public("production rollout")
 
     assert [candidate.chunk_id for candidate in result.candidates] == ["chunk:public"]
+
+
+def test_qdrant_adapter_uses_proofline_filters_for_tenant_and_public_documents(
+    dense_retriever: QdrantDenseRetriever,
+) -> None:
+    authorization = StaticAuthorizationAdapter(
+        {
+            ("user:ana", "tenant:acme"): (
+                ScopedResource(tenant_id="tenant:acme", resource_id="document:acme-rollout"),
+            )
+        }
+    )
+    retriever = build_scoped_qdrant_retriever(
+        dense_retriever,
+        authorization,
+        public_resource_ids=("document:public",),
+    )
+    context = DemoRequestContext(Principal(id="user:ana"), "tenant:acme")
+
+    results = asyncio.run(retriever.search("production rollout secret", context=context))
+
+    assert {candidate.chunk_id for candidate in results.items} == {"chunk:public", "chunk:acme"}
+    assert results.scope.filters["tenant_id"] == frozenset({"", "tenant:acme"})
+    assert results.scope.filters["resource_id"] == frozenset(
+        {"document:public", "document:acme-rollout"}
+    )
+
+    narrowed = asyncio.run(
+        retriever.follow_up_trusted(
+            results,
+            "production rollout",
+            narrowing_filters={"resource_id": ["document:public"]},
+        )
+    )
+
+    assert [candidate.chunk_id for candidate in narrowed.items] == ["chunk:public"]
+    with pytest.raises(ScopeError, match="does not support"):
+        asyncio.run(
+            retriever.follow_up_trusted(
+                results,
+                "production rollout",
+                narrowing_filters={"visibility": ["public"]},
+            )
+        )
+
+
+def test_qdrant_adapter_deny_all_skips_the_qdrant_query(
+    dense_retriever: QdrantDenseRetriever,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def query_points(*args: object, **kwargs: object) -> object:  # noqa: ARG001
+        raise AssertionError("deny-all filters must not query Qdrant")
+
+    monkeypatch.setattr(dense_retriever._client, "query_points", query_points)
+
+    results = dense_retriever.search(
+        "production rollout",
+        filters={"resource_id": frozenset()},
+        limit=5,
+    )
+
+    assert results == ()
+
+    with pytest.raises(ScopeError, match="only string scope values"):
+        dense_retriever.search(
+            "production rollout",
+            filters={"resource_id": frozenset({1})},
+            limit=5,
+        )
+
+
+def test_qdrant_proofline_adapter_does_not_require_legacy_authorization() -> None:
+    retriever = QdrantDenseRetriever(
+        QdrantClient(":memory:"),
+        "proofline-only",
+        TokenHashEmbeddingProvider(dimensions=16),
+    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Payload indexes have no effect")
+        retriever.index(
+            (
+                DocumentChunk(
+                    "chunk:public",
+                    "document:public",
+                    None,
+                    "Public rollout policy",
+                    True,
+                    "revision",
+                    "https://example.test/public",
+                    "public",
+                ),
+            )
+        )
+
+    results = retriever.search(
+        "public rollout",
+        filters={"resource_id": frozenset({"document:public"})},
+        limit=5,
+    )
+
+    assert [candidate.chunk_id for candidate in results] == ["chunk:public"]
+    with pytest.raises(RuntimeError, match="requires an authorization adapter"):
+        asyncio.run(retriever.search_tenant(Principal(id="user:ana"), "tenant:acme", "rollout"))
 
 
 def test_dense_index_rejects_existing_collection() -> None:

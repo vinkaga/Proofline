@@ -14,8 +14,10 @@ from typing import TYPE_CHECKING, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from proofline import ScopeError, ScopeFilters, validate_scope_filter_fields
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
+    Condition,
     Distance,
     FieldCondition,
     Filter,
@@ -302,13 +304,14 @@ class QdrantDenseRetriever:
     """Retrieve only Qdrant points admitted by an access-derived payload filter."""
 
     _UPSERT_BATCH_SIZE = 128
+    _SUPPORTED_SCOPE_FILTERS = frozenset({"tenant_id", "resource_id"})
 
     def __init__(
         self,
         client: QdrantClient,
         collection_name: str,
         embedding_provider: EmbeddingProvider,
-        authorization: AuthorizationAdapter,
+        authorization: AuthorizationAdapter | None = None,
     ) -> None:
         self._client = client
         self._collection_name = collection_name
@@ -378,12 +381,38 @@ class QdrantDenseRetriever:
     async def search_tenant(
         self, principal: Principal, tenant_id: str, query: str, limit: int = 5
     ) -> RetrievalResult:
+        if self._authorization is None:
+            raise RuntimeError(
+                "search_tenant requires an authorization adapter; "
+                "use search() through Proofline instead"
+            )
         scope = await self._authorization.list_permitted_resources(principal, tenant_id)
         candidates = self._search(query, _tenant_filter(tenant_id, scope.resource_ids), limit)
         return RetrievalResult(scope, candidates)
 
+    def search(
+        self,
+        query: str,
+        *,
+        filters: ScopeFilters,
+        limit: int,
+    ) -> tuple[RetrievalCandidate, ...]:
+        """Implement Proofline's backend contract with Qdrant payload filters.
+
+        Authorization is intentionally absent here. A ``ScopedRetriever``
+        resolves trusted authorization before calling this method and supplies
+        only its resulting filters. This adapter supports the string-valued
+        ``tenant_id`` and globally qualified ``resource_id`` payload fields
+        indexed by :meth:`index`.
+        """
+
+        validate_scope_filter_fields(filters, supported_fields=self._SUPPORTED_SCOPE_FILTERS)
+        if any(not values for values in filters.values()):
+            return ()
+        return self._search(query, _proofline_filter(filters), limit)
+
     def _search(
-        self, query: str, query_filter: Filter, limit: int
+        self, query: str, query_filter: Filter | None, limit: int
     ) -> tuple[RetrievalCandidate, ...]:
         if limit < 1:
             return ()
@@ -437,6 +466,23 @@ def _tenant_filter(tenant_id: str, resource_ids: tuple[str, ...]) -> Filter:
         ]
     )
     return Filter(should=[public, permitted])
+
+
+def _proofline_filter(filters: ScopeFilters) -> Filter | None:
+    """Translate the supported Proofline allowlists into conjunctive Qdrant filters."""
+
+    conditions: list[Condition] = []
+    for field_name, values in filters.items():
+        string_values = [value for value in values if type(value) is str]
+        if len(string_values) != len(values):
+            raise ScopeError(f"Qdrant field {field_name!r} supports only string scope values")
+        conditions.append(
+            FieldCondition(
+                key=field_name,
+                match=MatchAny(any=sorted(string_values)),
+            )
+        )
+    return Filter(must=conditions) if conditions else None
 
 
 def _candidate(payload: object, score: float, rank: int) -> RetrievalCandidate:

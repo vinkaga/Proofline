@@ -5,9 +5,11 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable, Iterable, Mapping, Sequence
+from asyncio import to_thread
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Generic, Protocol, TypeVar
+from functools import wraps
+from typing import Generic, ParamSpec, Protocol, TypeVar
 
 from proofline.proposed_step import ProposedRetrievalStep
 from proofline.scope import FilterAtom, RetrievalScope, ScopeFilters
@@ -16,6 +18,8 @@ ContextT = TypeVar("ContextT")
 ResultT = TypeVar("ResultT")
 ContextT_contra = TypeVar("ContextT_contra", contravariant=True)
 ResultT_co = TypeVar("ResultT_co", covariant=True)
+Parameters = ParamSpec("Parameters")
+ReturnT = TypeVar("ReturnT")
 ScopeResolution = RetrievalScope | Awaitable[RetrievalScope]
 ScopeValidation = bool | str | Awaitable[bool | str]
 
@@ -42,6 +46,24 @@ class ScopeValidator(Protocol):
 
 class ScopeValidationError(PermissionError):
     """Raised when the host no longer accepts a retrieval scope."""
+
+
+def offload_sync(
+    callable_: Callable[Parameters, ReturnT],
+) -> Callable[Parameters, Awaitable[ReturnT]]:
+    """Adapt a blocking synchronous integration for an async Proofline host.
+
+    ``ScopedRetriever`` calls ordinary synchronous callbacks on its caller's
+    event loop. Wrap only callbacks that are safe to run in a worker thread;
+    hosts retain control of client affinity, thread pools, cancellation, and
+    timeout policy.
+    """
+
+    @wraps(callable_)
+    async def offloaded(*args: Parameters.args, **kwargs: Parameters.kwargs) -> ReturnT:
+        return await to_thread(callable_, *args, **kwargs)
+
+    return offloaded
 
 
 class FilteredSearch(Protocol[ResultT_co]):
@@ -71,7 +93,8 @@ class ScopedRetriever(Generic[ContextT, ResultT]):
     not accept tenant, resource, principal, or raw filter arguments. A
     follow-up starts from a prior ``ScopedResults`` object and inherits the
     parent scope unless trusted application code supplies additional narrowing
-    filters.
+    filters. Synchronous callbacks run inline and may block the event loop;
+    use :func:`offload_sync` when the host has approved worker-thread execution.
     """
 
     def __init__(
@@ -190,6 +213,10 @@ def scoped(
     resolve_scope: ScopeResolver[ContextT],
     validate_scope: ScopeValidator | None = None,
 ) -> ScopedRetriever[ContextT, ResultT]:
-    """Wrap a sync or async retrieval callable with scope propagation."""
+    """Wrap a sync or async retrieval callable with scope propagation.
+
+    Synchronous callbacks execute inline. To prevent blocking an async host,
+    explicitly wrap thread-safe synchronous callbacks with :func:`offload_sync`.
+    """
 
     return ScopedRetriever(backend, resolve_scope=resolve_scope, validate_scope=validate_scope)

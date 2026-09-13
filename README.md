@@ -325,6 +325,15 @@ request ID; metadata is propagated unchanged and is never used to grant
 retrieval authority.
 Underneath, the wrapper targets the ordinary Python retrieval shape: a sync or
 async callable/protocol that accepts `query`, enforced `filters`, and `limit`.
+Synchronous callbacks run on the calling event loop. For a thread-safe blocking
+SDK, explicitly opt into worker-thread execution with `offload_sync`; the host
+remains responsible for client thread affinity, timeout, and cancellation policy:
+
+```python
+from proofline import offload_sync, scoped
+
+retriever = scoped(offload_sync(existing_retriever.search), resolve_scope=resolve_scope)
+```
 It preserves the application's document/result model rather than imposing a
 new one.
 

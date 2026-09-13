@@ -19,8 +19,11 @@ secure direct backend calls or decide whether content is factually trustworthy.
 
 ## Quickstart
 
-Wrap the retriever you already have. Only trusted application code creates the
-scope; queries from a model or a document cannot supply filters.
+From a repository checkout, install the core development environment with
+`uv sync`. Wrap an adapter that implements Proofline's `query`, keyword-only
+`filters`, and `limit` contract; framework retrievers often need a small adapter
+because their parameter names and filter formats differ. Only trusted application
+code creates the scope; queries from a model or a document cannot supply filters.
 
 ```python
 from proofline import RetrievalScope, scoped
@@ -374,9 +377,9 @@ set.
 
 #### Keep every result reproducible
 
-The corpus snapshot, chunking configuration, embedding model, retriever
-configuration, reranker, prompt version, model version, and evaluation set are
-recorded with each run.
+Corpus, evaluation-suite, retrieval-method, and embedding-provider versions are
+recorded by the evaluation artifacts that use them. The demo has no prompt or
+chat-model version because it makes no runtime model call.
 
 ## Reference-demo flow
 
@@ -419,10 +422,10 @@ allowlist further constrains tenant-scoped retrieval. This makes access control
 a property of every retrieval hop, not a filter applied after an LLM has seen
 the results.
 
-Question classification can be deterministic. The demonstration uses an LLM
-only for bounded query reformulation and response composition. That separation
-makes the access boundary and the host's additional value easy to inspect and
-test.
+Question classification, planner fixtures, and response composition are
+deterministic. The reference demonstration makes no runtime LLM call. Its
+responses acknowledge cited evidence or abstain; they are not answer-quality
+or generation evaluations.
 
 ## Reference-demo retrieval experiments
 
@@ -472,7 +475,7 @@ uv run proofline-reference-demo evaluate-hotpotqa \
 | --- | --- | --- |
 | Access isolation | Protected content stays out of unauthorized retrieval and prompts | unauthorized-chunk exposure rate, cross-tenant leakage pass rate |
 | Retrieval | Whether permitted relevant evidence appears in the candidate set and near the top | ACL-filtered Recall@k, MRR, nDCG |
-| Grounding | Whether answer claims are supported by returned sources | deterministic citation validation plus calibrated rubric |
+| Evidence provenance | Whether returned chunks have reviewed source metadata | deterministic citation-provenance checks |
 | Abstention | Whether unsupported or ambiguous questions avoid invented answers | exact expected outcome |
 | Tool behavior | Whether access questions call the tool with correct arguments | tool-call and result assertions |
 | Authorization | Whether allowed and denied cases match the policy model | exact expected decision |
@@ -490,8 +493,6 @@ Initial case categories:
 - Unsupported questions that require abstention.
 - Allowed and denied access checks.
 - Tool-required questions where retrieved text alone would be insufficient.
-- Ambiguous queries where one reformulation is useful, and cases where it must
-  not be attempted.
 - Cross-tenant, partial-access, and identifier-guessing probes.
 - Authorized shared documents containing realistic instruction-like
   cross-references, to test that documents are evidence rather than authority.
@@ -519,35 +520,27 @@ new method loses, provided the evaluation explains why.
 
 ## Reference-demo trace record
 
-Each evaluated interaction should write a structured record with:
+The current generated evidence artifacts contain the following safe fields when
+their workflow produces them:
 
 - case and corpus version;
 - request mode and resolved access scope;
-- root/parent/child scope identifiers, policy version, and allow/deny/requires-
-  approval decision for every proposed retrieval step;
+- scope lineage references and rejected proposal fields for scope-gate traces;
 - retrieval method, candidates, ranks, and scores;
 - the permitted chunk IDs supplied to response context;
 - evidence provenance, including source revision and parent retrieval step;
 - host decision and tool calls with redacted inputs and outputs;
-- final answer, citations, and abstention state;
-- latency and token or cost metadata when applicable; and
-- deterministic checks and model-grader results.
+- cited-evidence response or abstention state; and
+- deterministic gate results.
 
 No secrets, private documents, or personal data belong in the repository.
 
 ## Reference-demo operational view
 
-The evaluation runner produces a compact quality view for each corpus and
-configuration version: pass rate by request mode, ACL-filtered retrieval
-metrics, unauthorized exposure, access denials, abstentions, reformulation
-rate, tool failures, latency, and change from baseline. This is intentionally a
-small operational surface, not a full observability platform. Its purpose is to
-make a regression or unexpected trade-off visible quickly.
-
-Every retrieval comparison also reports ingestion time and cost per 1,000
-chunks, estimated query, reranking, and response cost per 1,000 queries, and
-p50 and p95 latency. Extrapolations are labeled as such and derived from the
-measured corpus and documented model pricing.
+The evaluation commands report the metrics their writers actually compute:
+retrieval quality, unauthorized exposure, provenance checks, and latency where
+the relevant retrieval evaluator measures it. They do not currently produce a
+complete per-run cost, token, answer-quality, or regression-delta report.
 
 ## Technology choices
 
@@ -567,7 +560,7 @@ measured corpus and documented model pricing.
 | Retrieval | BM25, Qdrant, and `qdrant-client` | Compares lexical, dense, hybrid, and reranked retrieval under the same filters. |
 | Tool boundary | Official MCP Python SDK | Demonstrates an authoritative `check_access` tool. |
 | Configuration | Pydantic Settings and local `.env` | Configures the demonstration only; the core library never reads host environment or secret files. |
-| Evaluation | `pytest` and `ir_measures` | Provides deterministic assertions and standard retrieval metrics. |
+| Evaluation | `pytest` and local metric implementations | Provides deterministic assertions and Recall@k, MRR, and nDCG calculations. |
 | Traces | OpenTelemetry and Phoenix | Supports trace visualization; the structured trace remains the source artifact. |
 
 Embedding and reranker providers are demonstration components selected by
@@ -718,9 +711,11 @@ OPENFGA_URL=http://localhost:8080 uv run pytest -m integration --no-cov
 ```
 
 The focused integration command disables the repository-wide coverage gate;
-run `uv run pytest` without test selection to enforce the 85% coverage threshold.
+run `uv run pytest` without test selection to enforce the 85% combined coverage
+threshold computed by coverage.py across statements and branches.
 
-The test suite enforces more than 85% branch coverage.
+Branch collection is enabled to expose untested decision paths, but CI does not
+currently enforce a separate branch-only percentage threshold.
 
 ## How to extend it
 

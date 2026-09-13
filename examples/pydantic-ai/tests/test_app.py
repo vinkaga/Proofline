@@ -3,12 +3,12 @@ import asyncio
 import app
 import pytest
 from app import PydanticRunDependencies, agent, follow_up
-from proofline_example_host import TrustedRequest, start_retrieval_run
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
+from scopeanchor_example_host import TrustedRequest, start_retrieval_run
 
-from proofline import ProposedStepError, ScopeError
+from scopeanchor import ProposedStepError, ScopeError
 
 
 def test_registered_pydantic_ai_tool_receives_only_trusted_dependencies(monkeypatch) -> None:
@@ -49,8 +49,8 @@ def test_pydantic_ai_host_rejects_scope_bearing_planner_output() -> None:
             follow_up(
                 request,
                 {"query": "beta rollout", "resource_id": "document:beta-rollout"},
+            )
         )
-    )
 
 
 def test_actual_pydantic_ai_tool_rounds_retain_scope_lineage_and_budget() -> None:

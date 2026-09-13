@@ -4,18 +4,18 @@
 
 import pytest
 
-from proofline_reference_demo.domain import (
+from scopeanchor_reference_demo.domain import (
     AccessScope,
     Principal,
     RetrievalCandidate,
     ScopedResource,
 )
-from proofline_reference_demo.evaluation_data import EvaluationSuite
-from proofline_reference_demo.hybrid_retrieval import HybridRrfRetriever
-from proofline_reference_demo.lexical_evaluation import evaluate_lexical_baseline
-from proofline_reference_demo.reranking import RerankingRetriever, TokenCoverageReranker
-from proofline_reference_demo.retrieval import DocumentChunk, RetrievalResult
-from proofline_reference_demo.retrieval_comparison import write_method_comparison_report
+from scopeanchor_reference_demo.evaluation_data import EvaluationSuite
+from scopeanchor_reference_demo.hybrid_retrieval import HybridRrfRetriever
+from scopeanchor_reference_demo.lexical_evaluation import evaluate_lexical_baseline
+from scopeanchor_reference_demo.reranking import RerankingRetriever, TokenCoverageReranker
+from scopeanchor_reference_demo.retrieval import DocumentChunk, RetrievalResult
+from scopeanchor_reference_demo.retrieval_comparison import write_method_comparison_report
 
 
 class StaticRetriever:
@@ -130,7 +130,7 @@ async def test_comparison_report_classifies_rank_changes(tmp_path) -> None:
         suite,
         "revision",
     )
-    from proofline_reference_demo.dense_retrieval import DenseIndexMetadata
+    from scopeanchor_reference_demo.dense_retrieval import DenseIndexMetadata
 
     output = tmp_path / "comparison.md"
     write_method_comparison_report(

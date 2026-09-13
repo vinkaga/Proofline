@@ -6,17 +6,17 @@ from dataclasses import replace
 
 import pytest
 
-from proofline_reference_demo.authorization import StaticAuthorizationAdapter
-from proofline_reference_demo.domain import RetrievalCandidate, ScopedResource
-from proofline_reference_demo.evaluation_data import EvaluationSuite
-from proofline_reference_demo.lexical_evaluation import (
+from scopeanchor_reference_demo.authorization import StaticAuthorizationAdapter
+from scopeanchor_reference_demo.domain import RetrievalCandidate, ScopedResource
+from scopeanchor_reference_demo.evaluation_data import EvaluationSuite
+from scopeanchor_reference_demo.lexical_evaluation import (
     _candidate_identifiers,
     evaluate_lexical_baseline,
     validate_baseline_measurement,
     write_lexical_report,
     write_lexical_traces,
 )
-from proofline_reference_demo.retrieval import (
+from scopeanchor_reference_demo.retrieval import (
     AccessGatedBm25Retriever,
     DocumentChunk,
     RetrievalResult,
@@ -110,11 +110,11 @@ def suite() -> EvaluationSuite:
                     "expected": "abstain",
                 },
                 {
-                        "id": "permission",
-                        "mode": "permission",
-                        "principal": "user:ana",
-                        "tenant": "tenant:acme",
-                        "query": "Can Ana view Acme?",
+                    "id": "permission",
+                    "mode": "permission",
+                    "principal": "user:ana",
+                    "tenant": "tenant:acme",
+                    "query": "Can Ana view Acme?",
                     "relation": "viewer",
                     "resource": "document:acme-rollout",
                     "required_tool": "check_access",

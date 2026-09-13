@@ -5,12 +5,12 @@
 from dataclasses import replace
 
 import pytest
-from proofline import ScopedRetriever
+from scopeanchor import ScopedRetriever
 
-from proofline_reference_demo.authorization import StaticAuthorizationAdapter
-from proofline_reference_demo.domain import RetrievalCandidate
-from proofline_reference_demo.openfga_fixture import load_static_permissions
-from proofline_reference_demo.scope_evaluation import (
+from scopeanchor_reference_demo.authorization import StaticAuthorizationAdapter
+from scopeanchor_reference_demo.domain import RetrievalCandidate
+from scopeanchor_reference_demo.openfga_fixture import load_static_permissions
+from scopeanchor_reference_demo.scope_evaluation import (
     ScopeGateError,
     evaluate_scope_propagation,
     validate_scope_propagation,

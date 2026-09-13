@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
-# Pins the public, Apache-2.0 source material that Proofline ingestion must use.
+# Pins the public, Apache-2.0 source material that ScopeAnchor ingestion must use.
 
 version: corpus-v0
 retrieved_at: 2026-09-03

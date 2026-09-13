@@ -3,16 +3,16 @@
 
 import pytest
 
-import proofline_reference_demo.release_evaluation as release_evaluation
-from proofline_reference_demo.authorization import StaticAuthorizationAdapter
-from proofline_reference_demo.bounded_host import BoundedHostTrace
-from proofline_reference_demo.domain import RequestMode, ScopedResource
-from proofline_reference_demo.evaluation_data import EvaluationSuite
-from proofline_reference_demo.release_evaluation import (
+import scopeanchor_reference_demo.release_evaluation as release_evaluation
+from scopeanchor_reference_demo.authorization import StaticAuthorizationAdapter
+from scopeanchor_reference_demo.bounded_host import BoundedHostTrace
+from scopeanchor_reference_demo.domain import RequestMode, ScopedResource
+from scopeanchor_reference_demo.evaluation_data import EvaluationSuite
+from scopeanchor_reference_demo.release_evaluation import (
     evaluate_release_suite,
     validate_release_evaluation,
 )
-from proofline_reference_demo.retrieval import DocumentChunk
+from scopeanchor_reference_demo.retrieval import DocumentChunk
 
 
 @pytest.mark.asyncio

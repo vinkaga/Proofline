@@ -5,11 +5,11 @@ from pathlib import Path
 from subprocess import run
 from zipfile import ZipFile
 
-import proofline
+import scopeanchor
 
 
 def test_package_exposes_a_version() -> None:
-    assert proofline.__version__ == "0.1.0"
+    assert scopeanchor.__version__ == "0.1.0"
 
 
 def test_built_wheel_includes_the_inline_typing_marker(tmp_path) -> None:
@@ -25,15 +25,15 @@ def test_built_wheel_includes_the_inline_typing_marker(tmp_path) -> None:
     )
 
     assert completed.returncode == 0, completed.stderr
-    wheel = next(tmp_path.glob("proofline-*.whl"))
+    wheel = next(tmp_path.glob("scopeanchor-*.whl"))
     with ZipFile(wheel) as archive:
-        assert "proofline/py.typed" in archive.namelist()
+        assert "scopeanchor/py.typed" in archive.namelist()
         archive.extractall(tmp_path / "site-packages")
 
     consumer = tmp_path / "consumer.py"
     consumer.write_text(
         """
-from proofline import RetrievalScope, scoped
+from scopeanchor import RetrievalScope, scoped
 
 def sync_resolver(context: str) -> RetrievalScope:
     return RetrievalScope.root(principal=context, filters={"resource_id": ["guide"]})

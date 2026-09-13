@@ -6,7 +6,7 @@ from typing import cast
 
 import pytest
 
-from proofline import ProposedRetrievalStep, ProposedStepError
+from scopeanchor import ProposedRetrievalStep, ProposedStepError
 
 
 @pytest.mark.parametrize("field", ["principal", "tenant_id", "resource_id", "filters", "scope"])

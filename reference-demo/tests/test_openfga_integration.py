@@ -9,12 +9,12 @@ import os
 import pytest
 from typer.testing import CliRunner
 
-from proofline_reference_demo.bounded_host import run_bounded_host
-from proofline_reference_demo.cli import app
-from proofline_reference_demo.domain import Principal
-from proofline_reference_demo.multi_hop import run_clean_two_hop, run_poisoned_two_hop
-from proofline_reference_demo.openfga_fixture import provision_openfga
-from proofline_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
+from scopeanchor_reference_demo.bounded_host import run_bounded_host
+from scopeanchor_reference_demo.cli import app
+from scopeanchor_reference_demo.domain import Principal
+from scopeanchor_reference_demo.multi_hop import run_clean_two_hop, run_poisoned_two_hop
+from scopeanchor_reference_demo.openfga_fixture import provision_openfga
+from scopeanchor_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
 
 OPENFGA_URL = os.environ.get("OPENFGA_URL")
 runner = CliRunner()

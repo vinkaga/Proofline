@@ -3,9 +3,9 @@ import asyncio
 import pytest
 from app import build_graph, run
 from langgraph.checkpoint.memory import InMemorySaver
-from proofline_example_host import TrustedRequest
+from scopeanchor_example_host import TrustedRequest
 
-from proofline import ProposedStepError
+from scopeanchor import ProposedStepError
 
 
 def test_graph_node_cannot_expand_the_captured_request_scope() -> None:

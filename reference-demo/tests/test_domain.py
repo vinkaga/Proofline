@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
-"""Verify the typed records that make Proofline traces and evaluation cases auditable."""
+"""Verify the typed records that make ScopeAnchor traces and evaluation cases auditable."""
 
 import pytest
 from pydantic import HttpUrl, TypeAdapter, ValidationError
 
-from proofline_reference_demo.domain import (
+from scopeanchor_reference_demo.domain import (
     AccessScope,
     Citation,
     EvaluationCase,

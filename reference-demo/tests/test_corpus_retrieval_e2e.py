@@ -6,11 +6,11 @@ from hashlib import sha256
 
 import pytest
 
-from proofline_reference_demo.authorization import StaticAuthorizationAdapter
-from proofline_reference_demo.corpus import AccessAssignments, CorpusManifest, build_corpus
-from proofline_reference_demo.domain import Principal, ScopedResource
-from proofline_reference_demo.retrieval import AccessGatedBm25Retriever
-from proofline_reference_demo.tracing import trace_tenant_retrieval
+from scopeanchor_reference_demo.authorization import StaticAuthorizationAdapter
+from scopeanchor_reference_demo.corpus import AccessAssignments, CorpusManifest, build_corpus
+from scopeanchor_reference_demo.domain import Principal, ScopedResource
+from scopeanchor_reference_demo.retrieval import AccessGatedBm25Retriever
+from scopeanchor_reference_demo.tracing import trace_tenant_retrieval
 
 
 @pytest.mark.asyncio

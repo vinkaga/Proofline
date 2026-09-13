@@ -4,11 +4,11 @@
 import asyncio
 
 import pytest
-from proofline import ScopeError
+from scopeanchor import ScopeError
 
-from proofline_reference_demo.authorization import StaticAuthorizationAdapter
-from proofline_reference_demo.domain import Principal, ScopedResource
-from proofline_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
+from scopeanchor_reference_demo.authorization import StaticAuthorizationAdapter
+from scopeanchor_reference_demo.domain import Principal, ScopedResource
+from scopeanchor_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
 
 
 def test_scoped_fixture_uses_core_scope_filters_before_ranking() -> None:

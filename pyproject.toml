@@ -2,14 +2,28 @@
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
 
 [project]
-name = "proofline"
+name = "scopeanchor"
 version = "0.1.0"
-description = "Capability-attenuating retrieval for permission-preserving multi-hop RAG."
+description = "Keep multi-hop retrieval anchored to the caller's authorized scope."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Vinay Agarwal" }]
 dependencies = []
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+    "Typing :: Typed",
+]
 
 [build-system]
 requires = ["hatchling>=1.27,<2"]
@@ -41,7 +55,7 @@ reportMissingTypeStubs = false
 testpaths = ["tests"]
 addopts = [
     "-ra",
-    "--cov=proofline",
+    "--cov=scopeanchor",
     "--cov-branch",
     "--cov-report=term-missing",
     "--cov-fail-under=85",

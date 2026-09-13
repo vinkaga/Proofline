@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from proofline_reference_demo.evaluation_data import EvaluationSuite, load_evaluation_suite
+from scopeanchor_reference_demo.evaluation_data import EvaluationSuite, load_evaluation_suite
 
 
 def test_release_suite_is_typed_and_unique() -> None:

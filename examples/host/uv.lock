@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.10"
 
 [[package]]
-name = "proofline"
+name = "scopeanchor"
 version = "0.1.0"
 source = { editable = "../../" }
 
@@ -19,12 +19,12 @@ dev = [
 ]
 
 [[package]]
-name = "proofline-example-host"
+name = "scopeanchor-example-host"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "proofline" },
+    { name = "scopeanchor" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "proofline", editable = "../../" }]
+requires-dist = [{ name = "scopeanchor", editable = "../../" }]

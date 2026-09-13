@@ -10,20 +10,20 @@ from io import BytesIO
 from urllib.error import HTTPError
 
 import pytest
-from proofline import ScopeError
 from qdrant_client import QdrantClient
+from scopeanchor import ScopeError
 
-import proofline_reference_demo.dense_retrieval as dense_retrieval
-from proofline_reference_demo.authorization import StaticAuthorizationAdapter
-from proofline_reference_demo.dense_retrieval import (
+import scopeanchor_reference_demo.dense_retrieval as dense_retrieval
+from scopeanchor_reference_demo.authorization import StaticAuthorizationAdapter
+from scopeanchor_reference_demo.dense_retrieval import (
     OpenAiEmbeddingProvider,
     QdrantDenseRetriever,
     TokenHashEmbeddingProvider,
     _candidate,
 )
-from proofline_reference_demo.domain import Principal, ScopedResource
-from proofline_reference_demo.retrieval import DocumentChunk
-from proofline_reference_demo.scoped_fixture import (
+from scopeanchor_reference_demo.domain import Principal, ScopedResource
+from scopeanchor_reference_demo.retrieval import DocumentChunk
+from scopeanchor_reference_demo.scoped_fixture import (
     DemoRequestContext,
     build_scoped_qdrant_retriever,
 )
@@ -106,7 +106,7 @@ async def test_dense_public_search_returns_only_public_chunks(
     assert [candidate.chunk_id for candidate in result.candidates] == ["chunk:public"]
 
 
-def test_qdrant_adapter_uses_proofline_filters_for_tenant_and_public_documents(
+def test_qdrant_adapter_uses_scopeanchor_filters_for_tenant_and_public_documents(
     dense_retriever: QdrantDenseRetriever,
 ) -> None:
     authorization = StaticAuthorizationAdapter(
@@ -175,10 +175,10 @@ def test_qdrant_adapter_deny_all_skips_the_qdrant_query(
         )
 
 
-def test_qdrant_proofline_adapter_does_not_require_legacy_authorization() -> None:
+def test_qdrant_scopeanchor_adapter_does_not_require_legacy_authorization() -> None:
     retriever = QdrantDenseRetriever(
         QdrantClient(":memory:"),
-        "proofline-only",
+        "scopeanchor-only",
         TokenHashEmbeddingProvider(dimensions=16),
     )
     with warnings.catch_warnings():

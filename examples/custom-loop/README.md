@@ -1,6 +1,6 @@
 # Custom-loop example
 
-This is the smallest useful Proofline integration. Authentication and
+This is the smallest useful ScopeAnchor integration. Authentication and
 authorization create `RequestContext`; the host converts it to a root
 `RetrievalScope` inside `build_retriever()`. The planner can propose a query,
 but `ProposedRetrievalStep.from_untrusted()` rejects any attempt to provide a

@@ -14,19 +14,24 @@ documents:
     path: docs/content/getting-started/perform-check.mdx
     url: https://openfga.dev/docs/getting-started/perform-check
     visibility: public
+    sha256: 4b692f9bb79ac3c480480341bd098045eecc244db55225c3c29faa3821c1c809
   - id: perform-list-objects
     path: docs/content/getting-started/perform-list-objects.mdx
     url: https://openfga.dev/docs/getting-started/perform-list-objects
     visibility: public
+    sha256: 4c6bb3dd6977ce50f83d9f0aecd83c4c79bd1d5469b1e6be6b226c2e9c60503d
   - id: modeling-concepts
     path: docs/content/authorization-concepts.mdx
     url: https://openfga.dev/docs/fga
     visibility: public
+    sha256: be5f0865c540e4fbd655b623ed333c5df0088dd9d75a6119113ad93746dd95c8
   - id: relationship-tuples
     path: docs/content/concepts.mdx
     url: https://openfga.dev/docs/concepts#what-is-a-relationship-tuple
     visibility: public
+    sha256: ead75599b875917433ccb9edc7105d5e2fcaac50ec1f989105354b5f2254d7b8
   - id: authorization-models
     path: docs/content/configuration-language.mdx
     url: https://openfga.dev/docs/configuration-language
     visibility: public
+    sha256: 6f789b0ab4f14556977304bea5513534f346525d38f8ae5b1ba835cfe708bbf0

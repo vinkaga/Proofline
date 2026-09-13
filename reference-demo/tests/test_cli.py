@@ -4,6 +4,7 @@
 
 import json
 import warnings
+from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -16,6 +17,7 @@ from proofline_reference_demo.authorization import StaticAuthorizationAdapter
 from proofline_reference_demo.domain import Principal, ScopedResource
 
 runner = CliRunner()
+_CHECK_SHA256 = sha256(b"Check decides whether a user may view a document.").hexdigest()
 
 
 def test_otlp_endpoint_is_an_explicit_global_cli_option(monkeypatch) -> None:
@@ -75,6 +77,7 @@ def test_ingest_writes_a_corpus_from_a_pinned_manifest(tmp_path) -> None:
                 "    path: docs/example.mdx",
                 "    url: https://example.test/example",
                 "    visibility: public",
+                f"    sha256: {sha256(b'One searchable paragraph.').hexdigest()}",
             ]
         )
     )
@@ -127,6 +130,7 @@ def test_evaluate_lexical_writes_report_and_retrieval_traces(tmp_path) -> None:
                 "    path: docs/check.mdx",
                 "    url: https://example.test/check",
                 "    visibility: public",
+                f"    sha256: {_CHECK_SHA256}",
             ]
         )
     )
@@ -190,6 +194,7 @@ def test_evaluate_dense_writes_comparison_report(tmp_path, monkeypatch) -> None:
                 "    path: docs/check.mdx",
                 "    url: https://example.test/check",
                 "    visibility: public",
+                f"    sha256: {_CHECK_SHA256}",
             ]
         )
     )
@@ -264,6 +269,7 @@ def test_ingest_writes_only_assigned_chunks_for_protected_documents(tmp_path) ->
                 "    path: docs/secret.mdx",
                 "    url: https://example.test/secret",
                 "    visibility: protected",
+                f"    sha256: {sha256(b'Protected rollout detail.').hexdigest()}",
             ]
         )
     )

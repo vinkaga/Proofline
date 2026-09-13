@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
 """Exercise corpus construction through an ACL-filtered tenant search."""
 
+from hashlib import sha256
+
 import pytest
 
 from proofline_reference_demo.authorization import StaticAuthorizationAdapter
@@ -32,12 +34,14 @@ async def test_built_assigned_chunks_are_filtered_by_tenant_and_acl(tmp_path) ->
                     "path": "docs/policy.mdx",
                     "url": "https://example.test/policy",
                     "visibility": "public",
+                    "sha256": sha256(b"Public policy overview.").hexdigest(),
                 },
                 {
                     "id": "rollout",
                     "path": "docs/rollout.mdx",
                     "url": "https://example.test/rollout",
                     "visibility": "protected",
+                    "sha256": sha256(b"Acme deployment runbook details.").hexdigest(),
                 },
             ],
         }
@@ -98,6 +102,7 @@ def test_protected_documents_create_only_assigned_chunks(tmp_path) -> None:
                     "path": "docs/secret.mdx",
                     "url": "https://example.test/secret",
                     "visibility": "protected",
+                    "sha256": sha256(b"Private detail.").hexdigest(),
                 }
             ],
         }

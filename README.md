@@ -664,6 +664,18 @@ The offline baseline derives direct-viewer grants from the checked-in OpenFGA
 tuples; inherited relationship behavior remains covered by the OpenFGA backend
 and integration tests.
 
+Write the reviewed scope-propagation gate and its redacted clean, benign, and
+rejected-proposal traces to stable versioned paths:
+
+```bash
+uv run proofline-reference-demo report
+```
+
+This creates `artifacts/scope-propagation-v0/scope-propagation-v0-report.json`
+and `artifacts/scope-propagation-v0/scope-propagation-v0-traces.jsonl`. To
+persist the HotpotQA runtime overlay evidence as well, pass `--output` and
+`--traces-output` to `evaluate-hotpotqa`.
+
 With local Qdrant running, compare its access-filtered dense-vector control to
 BM25 on the same corpus and cases:
 

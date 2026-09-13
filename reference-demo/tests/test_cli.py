@@ -37,11 +37,20 @@ def test_evaluate_runs_the_scope_propagation_release_gate() -> None:
     assert report["configurations"][0]["unauthorized_exposure"] is True
 
 
-def test_future_report_command_is_explicitly_unavailable() -> None:
-    result = runner.invoke(cli.app, ["report"])
+def test_report_writes_versioned_report_and_representative_redacted_traces(tmp_path) -> None:
+    output_dir = tmp_path / "evidence"
+    result = runner.invoke(cli.app, ["report", "--output-dir", str(output_dir)])
 
-    assert result.exit_code == 2
-    assert "planned for Phase 8" in result.stdout
+    assert result.exit_code == 0
+    report = json.loads((output_dir / "scope-propagation-v0-report.json").read_text())
+    traces = [
+        json.loads(line)
+        for line in (output_dir / "scope-propagation-v0-traces.jsonl").read_text().splitlines()
+    ]
+    assert report["version"] == "scope-propagation-v0"
+    assert report["passed"] is True
+    assert [trace["scenario"] for trace in traces] == ["clean", "benign", "poisoned"]
+    assert all("scope_id" not in json.dumps(trace) for trace in traces)
 
 
 def test_ingest_writes_a_corpus_from_a_pinned_manifest(tmp_path) -> None:

@@ -297,9 +297,21 @@ def test_hotpotqa_cli_reports_all_three_controls(tmp_path) -> None:
         )
     )
 
+    report_output = tmp_path / "hotpot-report.json"
+    traces_output = tmp_path / "hotpot-traces.jsonl"
     result = runner.invoke(
         cli.app,
-        ["evaluate-hotpotqa", "--dataset", str(dataset), "--manifest", str(manifest)],
+        [
+            "evaluate-hotpotqa",
+            "--dataset",
+            str(dataset),
+            "--manifest",
+            str(manifest),
+            "--output",
+            str(report_output),
+            "--traces-output",
+            str(traces_output),
+        ],
     )
 
     assert result.exit_code == 0
@@ -309,3 +321,7 @@ def test_hotpotqa_cli_reports_all_three_controls(tmp_path) -> None:
         "acl-filtered-per-hop",
         "scoped-plan-policy",
     ]
+    assert json.loads(report_output.read_text())["version"] == "test"
+    trace = json.loads(traces_output.read_text())
+    assert trace["case_id"] == "b"
+    assert "query" not in trace

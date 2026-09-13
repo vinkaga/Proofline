@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from proofline_example_host import RetrievalRun, TrustedRequest, retrieve, start_retrieval_run
 from pydantic_ai import Agent, RunContext
+from scopeanchor_example_host import RetrievalRun, TrustedRequest, retrieve, start_retrieval_run
 
 
 # The host supplies its production model at ``agent.run`` time.  Tests supply

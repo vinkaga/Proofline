@@ -32,10 +32,10 @@ def test_configured_otlp_exporter_posts_a_span_to_a_local_collector() -> None:
     endpoint = f"http://127.0.0.1:{server.server_port}/v1/traces"
     script = """
 from opentelemetry import trace
-from proofline_reference_demo.tracing import configure_otlp_tracing
+from scopeanchor_reference_demo.tracing import configure_otlp_tracing
 
 configure_otlp_tracing(__import__('sys').argv[1])
-with trace.get_tracer('proofline.reference_demo').start_as_current_span('proofline.test'):
+with trace.get_tracer('scopeanchor.reference_demo').start_as_current_span('scopeanchor.test'):
     pass
 """
     try:
@@ -66,9 +66,9 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from proofline_reference_demo.authorization import StaticAuthorizationAdapter
-from proofline_reference_demo.bounded_host import run_bounded_host
-from proofline_reference_demo.domain import Principal, ScopedResource
+from scopeanchor_reference_demo.authorization import StaticAuthorizationAdapter
+from scopeanchor_reference_demo.bounded_host import run_bounded_host
+from scopeanchor_reference_demo.domain import Principal, ScopedResource
 
 exporter = InMemorySpanExporter()
 provider = TracerProvider()
@@ -105,18 +105,18 @@ print(json.dumps([
     spans = json.loads(completed.stdout)
     assert {span["trace_id"] for span in spans}
     assert len({span["trace_id"] for span in spans}) == 1
-    request = next(span for span in spans if span["name"] == "proofline.request")
+    request = next(span for span in spans if span["name"] == "scopeanchor.request")
     initial_retrieval = next(
         span
         for span in spans
-        if span["name"] == "proofline.retrieval" and span["parent_id"] == request["span_id"]
+        if span["name"] == "scopeanchor.retrieval" and span["parent_id"] == request["span_id"]
     )
     authorization = next(
-        span for span in spans if span["name"] == "proofline.authorization.resolve_scope"
+        span for span in spans if span["name"] == "scopeanchor.authorization.resolve_scope"
     )
     assert request["parent_id"] == 0
     assert request["attributes"]["enduser.id"] == "user:ana"
-    assert request["attributes"]["proofline.scope.count"] == 2
-    assert initial_retrieval["attributes"]["proofline.scope.id"]
+    assert request["attributes"]["scopeanchor.scope.count"] == 2
+    assert initial_retrieval["attributes"]["scopeanchor.scope.id"]
     assert authorization["parent_id"] == initial_retrieval["span_id"]
     assert all(span["parent_id"] for span in spans if span is not request)

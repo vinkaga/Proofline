@@ -3,12 +3,12 @@
 
 import asyncio
 
-from proofline_reference_demo.authorization import StaticAuthorizationAdapter
-from proofline_reference_demo.bounded_host import run_bounded_host
-from proofline_reference_demo.domain import Principal, RequestMode, ScopedResource
-from proofline_reference_demo.permission_mcp import build_permission_server, check_access_via_mcp
-from proofline_reference_demo.request_routing import classify_request
-from proofline_reference_demo.retrieval import DocumentChunk
+from scopeanchor_reference_demo.authorization import StaticAuthorizationAdapter
+from scopeanchor_reference_demo.bounded_host import run_bounded_host
+from scopeanchor_reference_demo.domain import Principal, RequestMode, ScopedResource
+from scopeanchor_reference_demo.permission_mcp import build_permission_server, check_access_via_mcp
+from scopeanchor_reference_demo.request_routing import classify_request
+from scopeanchor_reference_demo.retrieval import DocumentChunk
 
 
 def _authorization() -> StaticAuthorizationAdapter:

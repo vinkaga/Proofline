@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
 """Verify local developer settings are typed and never represented as plain values."""
 
-from proofline_reference_demo.settings import load_settings
+from scopeanchor_reference_demo.settings import load_settings
 
 
 def test_settings_load_openai_key_from_dotenv(tmp_path, monkeypatch) -> None:

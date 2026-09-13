@@ -12,9 +12,9 @@ import pytest
 from qdrant_client import QdrantClient
 from typer.testing import CliRunner
 
-import proofline_reference_demo.cli as cli
-from proofline_reference_demo.authorization import StaticAuthorizationAdapter
-from proofline_reference_demo.domain import Principal, ScopedResource
+import scopeanchor_reference_demo.cli as cli
+from scopeanchor_reference_demo.authorization import StaticAuthorizationAdapter
+from scopeanchor_reference_demo.domain import Principal, ScopedResource
 
 runner = CliRunner()
 _CHECK_SHA256 = sha256(b"Check decides whether a user may view a document.").hexdigest()

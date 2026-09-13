@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from proofline_reference_demo.authorization import OpenFgaAuthorizationAdapter
-from proofline_reference_demo.domain import Principal
+from scopeanchor_reference_demo.authorization import OpenFgaAuthorizationAdapter
+from scopeanchor_reference_demo.domain import Principal
 
 
 @pytest.mark.asyncio

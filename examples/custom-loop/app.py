@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from proofline import (
+from scopeanchor import (
     ProposedRetrievalStep,
     RetrievalScope,
     ScopedRetriever,
@@ -15,7 +15,7 @@ from proofline import (
     scoped,
     validate_scope_filter_fields,
 )
-from proofline.scope import ScopeFilters
+from scopeanchor.scope import ScopeFilters
 
 
 @dataclass(frozen=True, slots=True)

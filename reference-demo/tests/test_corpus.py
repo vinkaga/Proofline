@@ -8,7 +8,7 @@ from hashlib import sha256
 import pytest
 from pydantic import ValidationError
 
-from proofline_reference_demo.corpus import (
+from scopeanchor_reference_demo.corpus import (
     AccessAssignments,
     CorpusManifest,
     build_corpus,
@@ -241,6 +241,6 @@ def test_manifest_resolves_assignments_relative_to_its_own_directory(tmp_path) -
         )
     )
 
-    from proofline_reference_demo.corpus import load_manifest
+    from scopeanchor_reference_demo.corpus import load_manifest
 
     assert load_manifest(manifest_path).access_assignments == assignments

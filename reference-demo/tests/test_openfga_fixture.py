@@ -8,9 +8,9 @@ from typing import cast
 
 import pytest
 
-import proofline_reference_demo.openfga_fixture as fixture
-from proofline_reference_demo.authorization import OpenFgaAuthorizationAdapter
-from proofline_reference_demo.domain import ScopedResource
+import scopeanchor_reference_demo.openfga_fixture as fixture
+from scopeanchor_reference_demo.authorization import OpenFgaAuthorizationAdapter
+from scopeanchor_reference_demo.domain import ScopedResource
 
 
 class FakeClient:

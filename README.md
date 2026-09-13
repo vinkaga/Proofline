@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
-<!-- Copyright (c) 2026 Vinay Agarwal. This document explains Proofline's purpose and contracts. -->
+<!-- Copyright (c) 2026 Vinay Agarwal. This document explains ScopeAnchor's purpose and contracts. -->
 
-# Proofline
+# ScopeAnchor
 
 Keep your RAG app's searches within the data each user is allowed to access.
 
@@ -10,7 +10,7 @@ receive information from documents they're allowed to read. If an agent runs
 additional searches to answer a question, those searches need the same access
 restrictions.
 
-Proofline automatically passes your application's permission filters to every
+ScopeAnchor automatically passes your application's permission filters to every
 search through its wrapper, including agent follow-ups. You keep your existing
 retriever.
 
@@ -27,10 +27,10 @@ document IDs, together with the caller's identity, form a **retrieval scope**.
   types unchanged.
 
 Your application still identifies the user and decides what they may access.
-Your retrieval backend must enforce the filters Proofline supplies. The model
+Your retrieval backend must enforce the filters ScopeAnchor supplies. The model
 can suggest a search query; it cannot choose whose permissions to use.
 
-Proofline is useful when your RAG app or agent searches data with different
+ScopeAnchor is useful when your RAG app or agent searches data with different
 access rules for different users or tasks. It protects calls made through its
 wrapper; it does not secure direct backend calls, detect prompt injection, or
 decide whether retrieved content is trustworthy.
@@ -42,7 +42,7 @@ The following results come from the
 Higher is better in every row. These are fixture results, not general attack
 success rates. ACL filtering means applying access-control rules to each search.
 
-| Measure | Intentionally insecure control | ACL filtering on every hop | Proofline |
+| Measure | Intentionally insecure control | ACL filtering on every hop | ScopeAnchor |
 | --- | ---: | ---: | ---: |
 | Cases where no unauthorized evidence was exposed | 0% | 100% | 100% |
 | Proposals containing permission-setting fields rejected before search | 0% | 0% | 100% |
@@ -51,26 +51,32 @@ success rates. ACL filtering means applying access-control rules to each search.
 Permission-setting fields include a caller identity, tenant, or resource filter.
 These must come from trusted application code. The rejection measure applies
 only to proposals containing those forbidden fields; ordinary query-only
-proposals remain accepted in the Proofline fixture.
+proposals remain accepted in the ScopeAnchor fixture.
 
-Both ACL filtering on every hop and Proofline prevent unauthorized evidence
-exposure in this fixture. Proofline also rejects invalid proposals before
+Both ACL filtering on every hop and ScopeAnchor prevent unauthorized evidence
+exposure in this fixture. ScopeAnchor also rejects invalid proposals before
 search and records how each follow-up inherits its access restrictions. These
 are additional enforcement and traceability properties, not a measured reduction
 in exposure compared with the ACL-filtered control.
 
-## Quickstart
+## Install
 
-From a repository checkout, install the core development environment with
+```bash
+pip install scopeanchor
+```
+
+For development from a repository checkout, install the core environment with
 `uv sync`.
+
+## Quickstart
 
 In this example, your application has already authenticated the user and resolved
 the document IDs they may access. `request.authorized_resource_ids` comes from
 that trusted authorization step, not from user input or a model response.
-`resolve_scope` packages those permissions for Proofline:
+`resolve_scope` packages those permissions for ScopeAnchor:
 
 ```python
-from proofline import RetrievalScope, scoped
+from scopeanchor import RetrievalScope, scoped
 
 
 def resolve_scope(request) -> RetrievalScope:
@@ -97,7 +103,7 @@ application code can create a narrower branch with
 `request_retriever.narrow_trusted(...)`.
 
 For an explicit, audited retrieval tree, parse a model proposal and call
-`follow_proposed(previous_results, proposal)`. Proofline uses the previous
+`follow_proposed(previous_results, proposal)`. ScopeAnchor uses the previous
 results' scope for that child search. Only trusted application code may use
 `follow_up_trusted(..., narrowing_filters=...)` to restrict it further.
 
@@ -121,7 +127,7 @@ results = await request_retriever.search("continue the investigation")
 ```
 
 Checkpoints are versioned JSON-safe data, not bearer credentials. On resume,
-Proofline checks the binding, resolves the caller's current authorization, and
+ScopeAnchor checks the binding, resolves the caller's current authorization, and
 rejects a saved branch that is broader than current access. It also preserves
 the saved branch's restrictions while applying any earlier current expiry or
 lower current follow-up limit. Store checkpoints where the caller cannot alter
@@ -133,7 +139,7 @@ then restores the branch before its follow-up node searches.
 
 ## Backend filter contract
 
-Proofline supplies the filters; the backend is responsible for applying them.
+ScopeAnchor supplies the filters; the backend is responsible for applying them.
 It must reject filter fields it does not support, require every supplied field
 to match, and return no matches for an empty list of permitted values.
 `validate_scope_filter_fields` and
@@ -141,7 +147,7 @@ to match, and return no matches for an empty list of permitted values.
 metadata can be represented as scalar fields:
 
 ```python
-from proofline import matches_scope_filters, validate_scope_filter_fields
+from scopeanchor import matches_scope_filters, validate_scope_filter_fields
 
 SUPPORTED_FILTERS = frozenset({"tenant_id", "resource_id"})
 
@@ -167,7 +173,7 @@ filters while selecting candidates.
 
 ### Access-state semantics
 
-Proofline makes the three access outcomes explicit:
+ScopeAnchor makes the three access outcomes explicit:
 
 - `RetrievalScope.root(..., filters={...})` creates a constrained scope. An
   empty filter mapping is rejected, so a failed authorization lookup cannot
@@ -189,7 +195,7 @@ A document can be relevant to a question without being available to the user
 asking it. Access restrictions must apply whenever an assistant searches,
 including when it follows a reference in a document or asks a second question.
 
-Proofline centralizes the work of carrying those restrictions between retrieval
+ScopeAnchor centralizes the work of carrying those restrictions between retrieval
 steps. A follow-up receives the same or narrower scope as its parent. Switching
 to a broader scope requires a separate authorization operation in trusted
 application code.
@@ -210,7 +216,7 @@ User: Can Ana see the production rollout guide?
 1. The host application identifies a tenant-scoped permission question.
 2. The authorization service evaluates
    check_access(user:ana, viewer, document:production-rollout-guide).
-3. The decision is deny. Proofline does not retrieve the guide or pass any of
+3. The decision is deny. ScopeAnchor does not retrieve the guide or pass any of
    its chunks to the model.
 4. The assistant explains that access is unavailable. It may cite permitted
    public policy documentation, but it cannot explain protected content that it
@@ -242,14 +248,14 @@ A relevant answer is still a failure if it exposes the wrong evidence.
   run records candidates, scores, tool calls, citations, outcomes, latency, and
   configuration.
 
-## What Proofline is and is not
+## What ScopeAnchor is and is not
 
-Proofline's target product is a small, framework-neutral retrieval wrapper. It
+ScopeAnchor's target product is a small, framework-neutral retrieval wrapper. It
 is not a RAG framework, agent runtime, planner, vector store, prompt-injection
 classifier, policy-language platform, chat application, or authorization engine.
 
 LangChain, LangGraph, LlamaIndex, Haystack, custom Python loops, and other
-systems can keep their own orchestration and document models. Proofline sits at
+systems can keep their own orchestration and document models. ScopeAnchor sits at
 their retrieval boundary. Every retrieval routed through it receives the
 authenticated caller's authorized scope or a stricter descendant scope.
 
@@ -260,7 +266,7 @@ trade-offs.
 
 It does not claim to solve prompt injection, factual poisoning, or calls that
 bypass the wrapper. Its narrow guarantee is architectural and testable:
-retrieval performed through Proofline cannot implicitly receive broader
+retrieval performed through ScopeAnchor cannot implicitly receive broader
 authority from model or retrieved-text output. It is a reference implementation
 and evaluation harness, not a claim of production-grade identity, multi-tenancy,
 or security.
@@ -301,9 +307,9 @@ For local trace viewing, start Phoenix with
 `docker compose --profile observability up phoenix` from `reference-demo`, then
 run a reference-demo command with
 `--otlp-endpoint http://localhost:6006/v1/traces`, for example
-`uv run proofline-reference-demo --otlp-endpoint http://localhost:6006/v1/traces
+`uv run scopeanchor-reference-demo --otlp-endpoint http://localhost:6006/v1/traces
 demo-tenant-search --authorization static`. Phoenix’s UI and OTLP/HTTP collector
-share port 6006; Proofline records IDs and counts, not passage text or raw
+share port 6006; ScopeAnchor records IDs and counts, not passage text or raw
 allowlists.
 
 ## Repository layout
@@ -311,11 +317,11 @@ allowlists.
 The repository separates the library, reference demonstration, and examples:
 
 ```text
-src/proofline/                  published library only
+src/scopeanchor/                  published library only
 tests/                          library contract tests, Python 3.10–3.14
 
 reference-demo/                 reproducible OpenFGA/Qdrant public-data demo
-  src/proofline_reference_demo/
+  src/scopeanchor_reference_demo/
   data/
   tests/
   .env.example
@@ -324,10 +330,10 @@ examples/README.md              design constraints for future integrations
 examples/host/                  installable shared fixture for framework examples
 ```
 
-`proofline` has only core dependencies and never reads `.env`. The reference
+`scopeanchor` has only core dependencies and never reads `.env`. The reference
 demo owns OpenFGA, Qdrant, MCP, Pydantic Settings, tracing, public data, and
 evaluation. Each framework example depends on its selected host framework and
-the installable shared fixture package; the fixture depends on Proofline.
+the installable shared fixture package; the fixture depends on ScopeAnchor.
 
 ### Evaluation fixture
 
@@ -359,10 +365,10 @@ reproduce and evaluate.
 
 ### Threat model and limits
 
-Proofline passes an immutable, trusted filter set to its wrapped backend. The
+ScopeAnchor passes an immutable, trusted filter set to its wrapped backend. The
 backend is part of the security boundary: it must apply every supplied filter
 as a conjunction, match an empty allowlist to no protected records, and reject
-unknown filters rather than ignoring them. Proofline cannot secure a backend
+unknown filters rather than ignoring them. ScopeAnchor cannot secure a backend
 that bypasses or misimplements that contract.
 
 Its target adversarial evaluation additionally tests whether an authorized
@@ -399,7 +405,7 @@ authorization operation, never a side effect of retrieved text.
 The recommended integration is a wrapped existing retriever:
 
 ```python
-from proofline import RetrievalScope, scoped
+from scopeanchor import RetrievalScope, scoped
 
 
 def resolve_scope(request_context: RequestContext) -> RetrievalScope:
@@ -436,7 +442,7 @@ SDK, explicitly opt into worker-thread execution with `offload_sync`; the host
 remains responsible for client thread affinity, timeout, and cancellation policy:
 
 ```python
-from proofline import offload_sync, scoped
+from scopeanchor import offload_sync, scoped
 
 retriever = scoped(offload_sync(existing_retriever.search), resolve_scope=resolve_scope)
 ```
@@ -446,7 +452,7 @@ new one.
 ### Reference-demo principles
 
 The following principles govern the public demonstration and evaluation harness;
-they do not make Proofline an agent or retrieval framework.
+they do not make ScopeAnchor an agent or retrieval framework.
 
 #### Start with baselines
 
@@ -551,7 +557,7 @@ interpret.
 The checked-in release suite contains 50 hand-authored, versioned retrieval and
 permission cases. A separate deterministic scope-propagation gate compares
 clean, benign, and poisoned multi-hop counterparts across three controls: an
-intentionally insecure baseline, ACL filtering on every hop, and Proofline's
+intentionally insecure baseline, ACL filtering on every hop, and ScopeAnchor's
 scoped plan policy.
 
 The broader public-data gate uses the pinned 50-case HotpotQA distractor-dev
@@ -573,7 +579,7 @@ parsing the file:
 curl --fail --location --output hotpot_dev_distractor_v1.json \
   https://huggingface.co/datasets/namlh2004/hotpotqa/resolve/7e54db4656209750ff487f6fdf8e39a66dba136b/hotpot_dev_distractor_v1.json
 cd reference-demo
-uv run proofline-reference-demo evaluate-hotpotqa \
+uv run scopeanchor-reference-demo evaluate-hotpotqa \
   --dataset ../hotpot_dev_distractor_v1.json
 ```
 
@@ -652,7 +658,7 @@ complete per-run cost, token, answer-quality, or regression-delta report.
 
 ### Core library
 
-| Concern | Choice | Role in Proofline |
+| Concern | Choice | Role in ScopeAnchor |
 | --- | --- | --- |
 | Compatibility | Python 3.10–3.14 | Target public-library support; Python 3.11+ is recommended. The reference demonstration remains on Python 3.13. |
 | Integration contract | Python protocol/callable | Wraps a host retriever using `query`, enforced `filters`, and `limit`, without imposing a document model. |
@@ -687,7 +693,7 @@ Prerequisites for the current reference demonstration: Python 3.13+,
 cd reference-demo
 uv sync --all-groups
 docker compose up -d
-uv run proofline-reference-demo --help
+uv run scopeanchor-reference-demo --help
 ```
 
 Run the foundation checks with:
@@ -701,15 +707,15 @@ uv run pytest
 Run the deterministic access-gated fixture and inspect its JSON trace with:
 
 ```bash
-OPENFGA_URL=http://localhost:8080 uv run proofline-reference-demo demo-tenant-search
+OPENFGA_URL=http://localhost:8080 uv run scopeanchor-reference-demo demo-tenant-search
 ```
 
 Run the deterministic clean and poisoned two-hop fixtures with the static test
 authorization adapter:
 
 ```bash
-uv run proofline-reference-demo demo-multi-hop --scenario clean
-uv run proofline-reference-demo demo-multi-hop --scenario poisoned
+uv run scopeanchor-reference-demo demo-multi-hop --scenario clean
+uv run scopeanchor-reference-demo demo-multi-hop --scenario poisoned
 ```
 
 The poisoned fixture is a deterministic test of the planner-input boundary; it
@@ -718,7 +724,7 @@ does not claim to detect arbitrary prompt injection or document poisoning.
 Run the CI-friendly scope-propagation release gate:
 
 ```bash
-uv run proofline-reference-demo evaluate
+uv run scopeanchor-reference-demo evaluate
 ```
 
 It exits nonzero if the scoped configuration accepts a scope-bearing planner
@@ -728,9 +734,9 @@ exceeds the rejected-step budget, or records incomplete scope lineage.
 Run the bounded reference host with a tenant-knowledge or permission request:
 
 ```bash
-OPENFGA_URL=http://localhost:8080 uv run proofline-reference-demo query \
+OPENFGA_URL=http://localhost:8080 uv run scopeanchor-reference-demo query \
   --query "What approval does Acme need for rollout?"
-OPENFGA_URL=http://localhost:8080 uv run proofline-reference-demo query \
+OPENFGA_URL=http://localhost:8080 uv run scopeanchor-reference-demo query \
   --query "Can Ana view the Beta rollout?" \
   --tenant tenant:beta --resource document:beta-rollout
 ```
@@ -740,7 +746,7 @@ context is bound when the server starts, so the tool accepts `relation` and
 `resource_id`, never a model-supplied principal or tenant:
 
 ```bash
-OPENFGA_URL=http://localhost:8080 uv run proofline-reference-demo serve-mcp \
+OPENFGA_URL=http://localhost:8080 uv run scopeanchor-reference-demo serve-mcp \
   --principal user:ana --tenant tenant:acme
 ```
 
@@ -752,14 +758,14 @@ must not be used as evidence of policy-engine behavior.
 The same fixture exposes one authoritative permission decision with:
 
 ```bash
-OPENFGA_URL=http://localhost:8080 uv run proofline-reference-demo demo-check-access
+OPENFGA_URL=http://localhost:8080 uv run scopeanchor-reference-demo demo-check-access
 ```
 
 Build and evaluate the pinned documentation corpus with a checkout at the
 revision named in `data/corpus/manifest.yaml`:
 
 ```bash
-uv run proofline-reference-demo evaluate-lexical --source-root /path/to/openfga.dev
+uv run scopeanchor-reference-demo evaluate-lexical --source-root /path/to/openfga.dev
 ```
 
 This writes `artifacts/lexical-baseline.md` and one inspectable trace per
@@ -776,7 +782,7 @@ Write the reviewed scope-propagation gate and its redacted clean, benign, and
 rejected-proposal traces to stable versioned paths:
 
 ```bash
-uv run proofline-reference-demo report
+uv run scopeanchor-reference-demo report
 ```
 
 This creates `artifacts/scope-propagation-v0/scope-propagation-v0-report.json`
@@ -788,7 +794,7 @@ With local Qdrant running, compare its access-filtered dense-vector control to
 BM25 on the same corpus and cases:
 
 ```bash
-uv run proofline-reference-demo evaluate-dense --source-root /path/to/openfga.dev
+uv run scopeanchor-reference-demo evaluate-dense --source-root /path/to/openfga.dev
 ```
 
 Pass `--recreate` to replace that command's named local collection on a repeat
@@ -825,7 +831,7 @@ currently enforce a separate branch-only percentage threshold.
 
 ## How to extend it
 
-Proofline is designed to make an extension falsifiable. Add one capability,
+ScopeAnchor is designed to make an extension falsifiable. Add one capability,
 add or revise the relevant evaluation cases, and compare it with the existing
 baseline. A feature is only an improvement if the evaluation results support
 it.
@@ -834,7 +840,7 @@ Useful extensions include:
 
 - **Retriever backends.** Implement the standard retrieval protocol for a
   different vector store, search engine, or application-specific retriever.
-  Proofline supplies authorization-derived filters; the host keeps its document
+  ScopeAnchor supplies authorization-derived filters; the host keeps its document
   and result model.
 - **Policy layers.** Add opt-in provenance export, revocation checks, cache
   partitioning, approval requirements, retrieval budgets, or tool governance.
@@ -853,7 +859,7 @@ leave behind a reproducible result.
 
 ## License
 
-Proofline is available under the [MIT License](LICENSE).
+ScopeAnchor is available under the [MIT License](LICENSE).
 
 That is the proof line: a traceable path from authorized source evidence and
 authoritative tools to a response that can be inspected, tested, and improved.

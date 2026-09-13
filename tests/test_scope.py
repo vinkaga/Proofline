@@ -7,8 +7,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-import proofline.scope as scope_module
-from proofline import (
+import scopeanchor.scope as scope_module
+from scopeanchor import (
     FilterAtom,
     RetrievalScope,
     ScopeCheckpointError,
@@ -195,9 +195,9 @@ def test_adapter_filter_contract_rejects_unknown_fields_and_matches_conjunctivel
 
     with pytest.raises(ScopeError, match="does not support"):
         validate_scope_filter_fields(
-            RetrievalScope.root(
-                principal="user:ana", filters={"resource_id": ["document:shared"]}
-            ).attenuate({"visibility": ["published"]}).filters,
+            RetrievalScope.root(principal="user:ana", filters={"resource_id": ["document:shared"]})
+            .attenuate({"visibility": ["published"]})
+            .filters,
             supported_fields={"resource_id"},
         )
 

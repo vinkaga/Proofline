@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
-"""LlamaIndex retriever integration backed by the shared Proofline host boundary."""
+"""LlamaIndex retriever integration backed by the shared ScopeAnchor host boundary."""
 
 from __future__ import annotations
 
@@ -10,21 +10,21 @@ from dataclasses import dataclass
 from llama_index.core import QueryBundle
 from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import NodeWithScore, TextNode
-from proofline_example_host import Evidence, TrustedRequest, retriever
+from scopeanchor_example_host import Evidence, TrustedRequest, retriever
 
-from proofline import ProposedRetrievalStep, ScopedResults
+from scopeanchor import ProposedRetrievalStep, ScopedResults
 
 
 @dataclass(frozen=True, slots=True)
 class FollowUpResult:
-    """LlamaIndex nodes plus the Proofline scope lineage for a planned hop."""
+    """LlamaIndex nodes plus the ScopeAnchor scope lineage for a planned hop."""
 
     nodes: tuple[NodeWithScore, ...]
     scope_id: str
     parent_scope_id: str | None
 
 
-class ProoflineRetriever(BaseRetriever):
+class ScopeAnchorRetriever(BaseRetriever):
     """A LlamaIndex retriever whose authority comes from trusted construction context."""
 
     def __init__(self, request: TrustedRequest) -> None:

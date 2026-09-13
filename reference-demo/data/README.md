@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 <!-- Copyright (c) 2026 Vinay Agarwal. This directory defines reproducible corpus and evaluation inputs. -->
 
-# Proofline data contracts
+# ScopeAnchor data contracts
 
 This directory contains versioned specifications, not downloaded source content
 or generated artifacts. `corpus/manifest.yaml` identifies the exact public

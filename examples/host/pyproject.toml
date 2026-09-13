@@ -2,14 +2,14 @@
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
 
 [project]
-name = "proofline-example-host"
+name = "scopeanchor-example-host"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = ["proofline"]
+dependencies = ["scopeanchor"]
 
 [build-system]
 requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-proofline = { path = "../..", editable = true }
+scopeanchor = { path = "../..", editable = true }

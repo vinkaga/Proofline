@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from proofline import (
+from scopeanchor import (
     BoundScopedRetriever,
     ProposedRetrievalStep,
     RetrievalScope,
@@ -62,9 +62,7 @@ def test_bound_retriever_resolves_trusted_context_once_for_independent_searches(
 
     retriever = scoped(backend, resolve_scope=resolve_scope)
 
-    async def run() -> tuple[
-        BoundScopedRetriever[str], ScopedResults[str], ScopedResults[str]
-    ]:
+    async def run() -> tuple[BoundScopedRetriever[str], ScopedResults[str], ScopedResults[str]]:
         bound = await retriever.bind("user:ana")
         first, second = await asyncio.gather(bound.search("first"), bound.search("second"))
         return bound, first, second
@@ -142,9 +140,7 @@ def test_resume_rejects_a_saved_scope_broader_than_current_authorization() -> No
 
     async def run() -> None:
         initial = await retriever.bind(frozenset({"guide-a", "guide-b"}))
-        checkpoint = initial.to_checkpoint(
-            binding={"principal": "user:ana", "task_id": "task-123"}
-        )
+        checkpoint = initial.to_checkpoint(binding={"principal": "user:ana", "task_id": "task-123"})
         await retriever.resume(
             checkpoint,
             context=frozenset({"guide-a"}),
@@ -167,9 +163,7 @@ def test_resume_applies_a_stricter_current_follow_up_limit() -> None:
 
     async def run() -> BoundScopedRetriever[str]:
         initial = await retriever.bind(3)
-        checkpoint = initial.to_checkpoint(
-            binding={"principal": "user:ana", "task_id": "task-123"}
-        )
+        checkpoint = initial.to_checkpoint(binding={"principal": "user:ana", "task_id": "task-123"})
         return await retriever.resume(
             checkpoint,
             context=1,
@@ -195,9 +189,7 @@ def test_resume_applies_an_earlier_current_expiry() -> None:
 
     async def run() -> BoundScopedRetriever[str]:
         initial = await retriever.bind(saved_expiry)
-        checkpoint = initial.to_checkpoint(
-            binding={"principal": "user:ana", "task_id": "task-123"}
-        )
+        checkpoint = initial.to_checkpoint(binding={"principal": "user:ana", "task_id": "task-123"})
         return await retriever.resume(
             checkpoint,
             context=current_expiry,

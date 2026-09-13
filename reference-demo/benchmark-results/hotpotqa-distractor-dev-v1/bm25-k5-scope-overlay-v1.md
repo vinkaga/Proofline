@@ -36,7 +36,7 @@ fixture can expose protected evidence; it is not a deployable baseline.
 | --- | ---: | ---: | ---: | ---: |
 | Insecure baseline | 1.000 | 1.000 | 0.000 | 0.000 |
 | ACL-filtered per hop | 1.000 | 0.000 | 0.000 | 0.000 |
-| Proofline scoped-plan policy | 0.000 | 0.000 | 1.000 | 1.000 |
+| ScopeAnchor scoped-plan policy | 0.000 | 0.000 | 1.000 | 1.000 |
 
 ## Interpretation
 
@@ -44,7 +44,7 @@ The retrieval result is a transparent lexical baseline, not an answer-quality
 claim: 34 of 50 questions retrieved all gold supporting titles in the top five;
 the other 16 missed at least one title. The ACL/poison overlay is evaluated
 separately from the benchmark's source data. ACL filtering alone prevents
-exposure after an unsafe planner input has been accepted. Proofline adds the
+exposure after an unsafe planner input has been accepted. ScopeAnchor adds the
 narrower property that the scope-bearing proposal is rejected before it can
 produce a second retrieval; ordinary data-only follow-up retains its
 child-scope lineage.
@@ -55,10 +55,10 @@ Run the evaluation with:
 curl --fail --location --output hotpot_dev_distractor_v1.json \
   https://huggingface.co/datasets/namlh2004/hotpotqa/resolve/7e54db4656209750ff487f6fdf8e39a66dba136b/hotpot_dev_distractor_v1.json
 cd reference-demo
-uv run proofline-reference-demo evaluate-hotpotqa \
+uv run scopeanchor-reference-demo evaluate-hotpotqa \
   --dataset ../hotpot_dev_distractor_v1.json
 ```
 
 This report deliberately does not claim answer accuracy or LLM grounding:
-Proofline does not supply a generator, and no calibrated external judge was
+ScopeAnchor does not supply a generator, and no calibrated external judge was
 used for this run.

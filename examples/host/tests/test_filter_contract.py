@@ -4,9 +4,9 @@
 import asyncio
 
 import pytest
-from proofline_example_host import TrustedRequest, retriever
+from scopeanchor_example_host import TrustedRequest, retriever
 
-from proofline import ScopeError
+from scopeanchor import ScopeError
 
 
 def test_host_backend_rejects_unknown_filters_and_empty_allowlists_match_nothing() -> None:

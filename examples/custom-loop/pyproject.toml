@@ -1,9 +1,9 @@
 [project]
-name = "proofline-custom-loop-example"
+name = "scopeanchor-custom-loop-example"
 version = "0.1.0"
-description = "Minimal custom-loop host for Proofline."
+description = "Minimal custom-loop host for ScopeAnchor."
 requires-python = ">=3.10"
-dependencies = ["proofline"]
+dependencies = ["scopeanchor"]
 
 [dependency-groups]
 dev = ["pyright>=1.1.400,<2", "pytest>=8.4,<9", "ruff>=0.12,<1"]
@@ -12,7 +12,7 @@ dev = ["pyright>=1.1.400,<2", "pytest>=8.4,<9", "ruff>=0.12,<1"]
 target-version = "py310"
 
 [tool.uv.sources]
-proofline = { path = "../..", editable = true }
+scopeanchor = { path = "../..", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

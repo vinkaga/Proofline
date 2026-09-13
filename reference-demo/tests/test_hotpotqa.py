@@ -7,13 +7,13 @@ import json
 from dataclasses import replace
 
 import pytest
-from proofline import RetrievalScope
+from scopeanchor import RetrievalScope
 from typer.testing import CliRunner
 
-import proofline_reference_demo.cli as cli
-import proofline_reference_demo.hotpot_evaluation as hotpot_evaluation
-from proofline_reference_demo.domain import RetrievalCandidate
-from proofline_reference_demo.hotpot_evaluation import (
+import scopeanchor_reference_demo.cli as cli
+import scopeanchor_reference_demo.hotpot_evaluation as hotpot_evaluation
+from scopeanchor_reference_demo.domain import RetrievalCandidate
+from scopeanchor_reference_demo.hotpot_evaluation import (
     evaluate_hotpotqa_retrieval,
     evaluate_hotpotqa_scope_controls,
     evaluate_hotpotqa_scope_overlay,
@@ -21,13 +21,13 @@ from proofline_reference_demo.hotpot_evaluation import (
     validate_hotpotqa_scope_controls,
     validate_hotpotqa_scope_overlay,
 )
-from proofline_reference_demo.hotpotqa import (
+from scopeanchor_reference_demo.hotpotqa import (
     HotpotManifest,
     build_overlay,
     evaluate_overlay,
     load_cases,
 )
-from proofline_reference_demo.retrieval import DocumentChunk
+from scopeanchor_reference_demo.retrieval import DocumentChunk
 
 runner = CliRunner()
 

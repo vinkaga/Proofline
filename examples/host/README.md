@@ -1,6 +1,6 @@
 # Shared example host fixture
 
-`proofline-example-host` is an internal package used only by the framework
+`scopeanchor-example-host` is an internal package used only by the framework
 examples in this repository. It keeps a tiny retriever, trusted request
 context, and fixed Acme/Beta evidence constant, so each example demonstrates
 framework wiring rather than a different security model.

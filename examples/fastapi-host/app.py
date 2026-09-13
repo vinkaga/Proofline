@@ -5,11 +5,11 @@
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from proofline_example_host import TrustedRequest, retrieve, retrieve_results
+from scopeanchor_example_host import TrustedRequest, retrieve, retrieve_results
 
-from proofline import ProposedStepError
+from scopeanchor import ProposedStepError
 
-app = FastAPI(title="Proofline document search")
+app = FastAPI(title="ScopeAnchor document search")
 
 _CALLER_SCOPES = {
     "ana": frozenset({"document:acme-rollout"}),

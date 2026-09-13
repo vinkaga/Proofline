@@ -3,9 +3,9 @@
 
 import asyncio
 
-from proofline_reference_demo.authorization import StaticAuthorizationAdapter
-from proofline_reference_demo.domain import Principal, ScopedResource
-from proofline_reference_demo.multi_hop import (
+from scopeanchor_reference_demo.authorization import StaticAuthorizationAdapter
+from scopeanchor_reference_demo.domain import Principal, ScopedResource
+from scopeanchor_reference_demo.multi_hop import (
     run_benign_two_hop,
     run_clean_two_hop,
     run_poisoned_two_hop,

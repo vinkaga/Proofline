@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from proofline_example_host import TrustedRequest, retriever
+from scopeanchor_example_host import TrustedRequest, retriever
 
-from proofline import ProposedRetrievalStep
+from scopeanchor import ProposedRetrievalStep
 
 
 class RetrievalState(TypedDict):

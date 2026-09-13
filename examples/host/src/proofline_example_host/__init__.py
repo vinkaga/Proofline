@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from proofline import (
     ProposedRetrievalStep,
@@ -35,6 +36,47 @@ _EVIDENCE = (
     Evidence("document:acme-rollout", "Acme requires release-manager approval."),
     Evidence("document:beta-rollout", "Beta has protected rollout details."),
 )
+
+
+@dataclass(slots=True)
+class RetrievalRun:
+    """Host-owned retrieval state for one agent run.
+
+    Calls are serialized so concurrent framework tool invocations cannot each
+    observe an empty history and create independent roots.  The first call
+    resolves the trusted request scope; every later call is an inherited
+    follow-up and therefore consumes the same branch's follow-up budget.
+    """
+
+    request: TrustedRequest
+    _boundary: ScopedRetriever[TrustedRequest, Evidence]
+    _previous: ScopedResults[Evidence] | None = None
+    _history: list[ScopedResults[Evidence]] = field(default_factory=list, init=False, repr=False)
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+
+    @property
+    def history(self) -> tuple[ScopedResults[Evidence], ...]:
+        """Return completed retrievals for tracing and framework-level tests."""
+
+        return tuple(self._history)
+
+    async def retrieve(self, query: str) -> ScopedResults[Evidence]:
+        """Run an initial search once, then only scope-preserving follow-ups."""
+
+        async with self._lock:
+            if self._previous is None:
+                result = await self._boundary.search(query, context=self.request)
+            else:
+                result = await self._boundary.follow_up(self._previous, query)
+            self._previous = result
+            self._history.append(result)
+            return result
+
+
+def start_retrieval_run(request: TrustedRequest) -> RetrievalRun:
+    """Create isolated host state; never reuse it across agent executions."""
+
+    return RetrievalRun(request=request, _boundary=retriever())
 
 
 def retriever() -> ScopedRetriever[TrustedRequest, Evidence]:

@@ -232,3 +232,54 @@ async def test_evaluation_detects_an_unauthorized_candidate(suite: EvaluationSui
     measurement = await evaluate_lexical_baseline(UnsafeRetriever(), suite, "corpus-test")
 
     assert measurement.unauthorized_exposure_rate == 1
+
+
+@pytest.mark.asyncio
+async def test_quality_gate_rejects_actual_permitted_but_irrelevant_retrieval() -> None:
+    """Utility gates must fail behavior, not just a manually changed metric."""
+
+    class IrrelevantRetriever:
+        async def search_public(self, query: str, limit: int = 5):  # noqa: ARG002
+            return RetrievalResult(
+                None,
+                (
+                    RetrievalCandidate(
+                        chunk_id="chunk:irrelevant",
+                        resource_id="document:public",
+                        rank=1,
+                        score=1,
+                        document_id="wrong-source",
+                        source_url="https://example.test/wrong",
+                        source_revision="revision",
+                    ),
+                ),
+            )
+
+        async def search_tenant(self, principal, tenant_id, query, limit=5):  # noqa: ANN001, ARG002
+            return await self.search_public(query, limit)
+
+    quality_suite = EvaluationSuite.model_validate(
+        {
+            "version": "quality-test",
+            "lexical_quality_gate": {"recall_at_k": 1, "mrr": 1, "ndcg_at_k": 1},
+            "cases": [
+                {
+                    "id": "relevant-public-case",
+                    "mode": "public_documentation",
+                    "principal": "user:ana",
+                    "query": "Check",
+                    "expected": "cited_answer",
+                    "required_sources": ["perform-check"],
+                }
+            ],
+        }
+    )
+
+    measurement = await evaluate_lexical_baseline(
+        IrrelevantRetriever(), quality_suite, "corpus-test"
+    )
+
+    assert measurement.unauthorized_exposure_rate == 0
+    assert measurement.recall_at_k == 0
+    with pytest.raises(ValueError, match="recall fell below"):
+        validate_baseline_measurement(measurement, quality_suite.lexical_quality_gate)

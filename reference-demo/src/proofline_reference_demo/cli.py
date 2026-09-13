@@ -10,6 +10,8 @@ reviewer from mistaking scaffolding for a completed capability.
 import asyncio
 import json
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Annotated
@@ -106,6 +108,46 @@ def _not_available(command: str, phase: int) -> None:
     raise typer.Exit(code=2)
 
 
+def _openfga_url(value: str | None) -> str:
+    """Resolve the explicit option first, then the local-demo environment."""
+
+    server_url = value or os.environ.get("OPENFGA_URL")
+    if not server_url:
+        raise typer.BadParameter(
+            "set --openfga-url or OPENFGA_URL, or explicitly select --authorization static"
+        )
+    return server_url
+
+
+@asynccontextmanager
+async def _selected_authorization(
+    authorization: str,
+    openfga_url: str | None,
+) -> AsyncIterator[AuthorizationAdapter]:
+    """Yield the selected policy adapter and clean up temporary OpenFGA stores."""
+
+    if authorization == "static":
+        yield StaticAuthorizationAdapter(load_static_permissions())
+        return
+    if authorization != "openfga":
+        raise typer.BadParameter("authorization must be openfga or static")
+    provisioned = await provision_openfga(_openfga_url(openfga_url))
+    try:
+        yield provisioned.adapter
+    finally:
+        await provisioned.delete()
+
+
+def _warn_static_authorization() -> None:
+    """Keep the offline fixture from being mistaken for relationship evaluation."""
+
+    typer.echo(
+        "Using fixture-only static direct-viewer grants; inherited OpenFGA relationships are not "
+        "evaluated.",
+        err=True,
+    )
+
+
 @app.command()
 def ingest(
     source_root: Annotated[Path, typer.Option(exists=True, file_okay=False)],
@@ -187,14 +229,27 @@ def demo_check_access(
 def serve_mcp(
     principal: Annotated[str, typer.Option()] = "user:ana",
     tenant: Annotated[str, typer.Option()] = "tenant:acme",
+    authorization: Annotated[
+        str,
+        typer.Option(help="openfga evaluates the checked-in policy; static is a limited fixture."),
+    ] = "openfga",
+    openfga_url: Annotated[
+        str | None,
+        typer.Option(help="OpenFGA server URL; defaults to OPENFGA_URL."),
+    ] = None,
 ) -> None:
-    """Serve the context-bound fixture ``check_access`` MCP tool over stdio."""
+    """Serve the context-bound ``check_access`` MCP tool over stdio."""
 
-    build_permission_server(
-        StaticAuthorizationAdapter(load_static_permissions()),
-        principal=Principal(id=principal),
-        tenant_id=tenant,
-    ).run()
+    if authorization == "static":
+        _warn_static_authorization()
+    asyncio.run(
+        _serve_permission_mcp(
+            principal=Principal(id=principal),
+            tenant_id=tenant,
+            authorization=authorization,
+            openfga_url=openfga_url,
+        )
+    )
 
 
 @app.command("demo-multi-hop")
@@ -400,6 +455,23 @@ async def _check_access_with_openfga(
         await provisioned.delete()
 
 
+async def _serve_permission_mcp(
+    *,
+    principal: Principal,
+    tenant_id: str,
+    authorization: str,
+    openfga_url: str | None,
+) -> None:
+    """Run MCP and OpenFGA in one event-loop lifecycle for safe SDK cleanup."""
+
+    async with _selected_authorization(authorization, openfga_url) as adapter:
+        await build_permission_server(
+            adapter,
+            principal=principal,
+            tenant_id=tenant_id,
+        ).run_stdio_async()
+
+
 @app.command()
 def query(
     query_text: Annotated[str, typer.Option("--query")] = (
@@ -409,12 +481,23 @@ def query(
     tenant: Annotated[str, typer.Option()] = "tenant:acme",
     relation: Annotated[str, typer.Option()] = "viewer",
     resource: Annotated[str | None, typer.Option()] = None,
+    authorization: Annotated[
+        str,
+        typer.Option(help="openfga evaluates the checked-in policy; static is a limited fixture."),
+    ] = "openfga",
+    openfga_url: Annotated[
+        str | None,
+        typer.Option(help="OpenFGA server URL; defaults to OPENFGA_URL."),
+    ] = None,
 ) -> None:
-    """Run one deterministic bounded host request through the reference fixture."""
+    """Run one bounded host request through the selected authorization backend."""
 
+    if authorization == "static":
+        _warn_static_authorization()
     trace = asyncio.run(
-        run_bounded_host(
-            StaticAuthorizationAdapter(load_static_permissions()),
+        _run_query(
+            authorization=authorization,
+            openfga_url=openfga_url,
             principal=Principal(id=principal),
             tenant_id=tenant,
             query=query_text,
@@ -423,6 +506,29 @@ def query(
         )
     )
     typer.echo(json.dumps(trace.as_dict(), indent=2))
+
+
+async def _run_query(
+    *,
+    authorization: str,
+    openfga_url: str | None,
+    principal: Principal,
+    tenant_id: str,
+    query: str,
+    relation: str,
+    resource_id: str | None,
+):
+    """Execute the normal host path with the requested policy adapter."""
+
+    async with _selected_authorization(authorization, openfga_url) as adapter:
+        return await run_bounded_host(
+            adapter,
+            principal=principal,
+            tenant_id=tenant_id,
+            query=query,
+            relation=relation,
+            resource_id=resource_id,
+        )
 
 
 @app.command()
@@ -513,7 +619,7 @@ def evaluate_hotpotqa(
         )
     )
     try:
-        validate_hotpotqa_evaluation(report)
+        validate_hotpotqa_evaluation(report, benchmark.retrieval_quality_gate)
         validate_hotpotqa_scope_overlay(scope_traces)
         validate_hotpotqa_scope_controls(controls)
     except ValueError as error:

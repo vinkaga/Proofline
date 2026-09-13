@@ -19,11 +19,13 @@ from proofline.scope import ScopeFilters
 
 from proofline_reference_demo.authorization import StaticAuthorizationAdapter
 from proofline_reference_demo.domain import Principal, RetrievalCandidate, ScopedResource
-from proofline_reference_demo.hotpotqa import HotpotCase, HotpotOverlayReport, OverlayCase
+from proofline_reference_demo.hotpotqa import (
+    HotpotCase,
+    HotpotOverlayReport,
+    HotpotRetrievalQualityGate,
+    OverlayCase,
+)
 from proofline_reference_demo.retrieval import AccessGatedBm25Retriever, DocumentChunk
-
-_MIN_SUPPORTING_TITLE_RECALL_AT_K = 0.83
-_MIN_ANSWER_EVIDENCE_COVERAGE_AT_K = 0.68
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,7 +331,10 @@ def evaluate_hotpotqa_retrieval(
     )
 
 
-def validate_hotpotqa_evaluation(report: HotpotEvaluationReport) -> None:
+def validate_hotpotqa_evaluation(
+    report: HotpotEvaluationReport,
+    quality_gate: HotpotRetrievalQualityGate,
+) -> None:
     """Enforce recorded utility baselines and non-negotiable overlay controls."""
 
     if report.clean_supporting_coverage != 1:
@@ -338,11 +343,11 @@ def validate_hotpotqa_evaluation(report: HotpotEvaluationReport) -> None:
         raise ValueError("HotpotQA overlay accepted a scope-bearing proposal")
     if report.benign_acceptance_rate != 1:
         raise ValueError("HotpotQA overlay blocked a benign data-only proposal")
-    if report.supporting_title_recall_at_k < _MIN_SUPPORTING_TITLE_RECALL_AT_K:
+    if report.supporting_title_recall_at_k < quality_gate.supporting_title_recall_at_k:
         raise ValueError(
             "HotpotQA supporting-title recall fell below the recorded release baseline"
         )
-    if report.answer_evidence_coverage_at_k < _MIN_ANSWER_EVIDENCE_COVERAGE_AT_K:
+    if report.answer_evidence_coverage_at_k < quality_gate.answer_evidence_coverage_at_k:
         raise ValueError(
             "HotpotQA complete supporting-evidence coverage fell below "
             "the recorded release baseline"

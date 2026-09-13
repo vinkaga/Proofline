@@ -32,12 +32,20 @@ class HotpotSubset(BaseModel):
     selection: str
 
 
+class HotpotRetrievalQualityGate(BaseModel):
+    """Reviewed lower bounds for this pinned benchmark version and subset."""
+
+    supporting_title_recall_at_k: float = Field(ge=0.0, le=1.0)
+    answer_evidence_coverage_at_k: float = Field(ge=0.0, le=1.0)
+
+
 class HotpotManifest(BaseModel):
     """Versioned contract for the downloaded HotpotQA input."""
 
     version: str
     source: HotpotSource
     subset: HotpotSubset
+    retrieval_quality_gate: HotpotRetrievalQualityGate
 
 
 @dataclass(frozen=True, slots=True)

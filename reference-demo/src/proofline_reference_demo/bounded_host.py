@@ -20,6 +20,7 @@ from proofline_reference_demo.scoped_fixture import (
     build_scoped_retriever,
 )
 from proofline_reference_demo.tracing import trace_operation
+from proofline_reference_demo.vertical_slice import vertical_slice_chunks
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,10 +99,8 @@ async def run_bounded_host(
         nonlocal retrieval_hop_count
         retrieval_hop_count += 1
 
-    if mode is RequestMode.PUBLIC_DOCUMENTATION and chunks is not None:
-        candidates = AccessGatedBm25Retriever.rank_for_answer(
-            query, tuple(chunk for chunk in chunks if chunk.is_public), 10
-        )
+    if mode is RequestMode.PUBLIC_DOCUMENTATION:
+        candidates = _retrieve_public_documentation(query, chunks or vertical_slice_chunks())
         response = compose_response(query, candidates)
         return _response_trace(
             mode,
@@ -162,6 +161,21 @@ async def run_bounded_host(
         retrieval_hop_count,
         scope_ids,
     )
+
+
+def _retrieve_public_documentation(
+    query: str,
+    chunks: tuple[DocumentChunk, ...],
+) -> tuple[RetrievalCandidate, ...]:
+    """Search only the explicit public corpus, independent of tenant authority.
+
+    Public routing deliberately does not resolve an access scope or reuse the
+    tenant retriever.  This keeps protected evidence out of a public response,
+    cache, and citation set even when the current principal could access it.
+    """
+
+    public_chunks = tuple(chunk for chunk in chunks if chunk.is_public)
+    return AccessGatedBm25Retriever.rank_for_answer(query, public_chunks, 10)
 
 
 def _requires_fixture_follow_up(query: str, candidates: tuple[RetrievalCandidate, ...]) -> bool:

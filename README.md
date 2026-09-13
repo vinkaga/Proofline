@@ -620,8 +620,10 @@ exceeds the rejected-step budget, or records incomplete scope lineage.
 Run the bounded reference host with a tenant-knowledge or permission request:
 
 ```bash
-uv run proofline-reference-demo query --query "What approval does Acme need for rollout?"
-uv run proofline-reference-demo query --query "Can Ana view the Beta rollout?" \
+OPENFGA_URL=http://localhost:8080 uv run proofline-reference-demo query \
+  --query "What approval does Acme need for rollout?"
+OPENFGA_URL=http://localhost:8080 uv run proofline-reference-demo query \
+  --query "Can Ana view the Beta rollout?" \
   --tenant tenant:beta --resource document:beta-rollout
 ```
 
@@ -630,8 +632,14 @@ context is bound when the server starts, so the tool accepts `relation` and
 `resource_id`, never a model-supplied principal or tenant:
 
 ```bash
-uv run proofline-reference-demo serve-mcp --principal user:ana --tenant tenant:acme
+OPENFGA_URL=http://localhost:8080 uv run proofline-reference-demo serve-mcp \
+  --principal user:ana --tenant tenant:acme
 ```
+
+Both commands default to a temporary store containing the checked-in OpenFGA
+model and tuples. `--authorization static` is an explicit offline
+direct-viewer fixture only: it does not evaluate inherited relationships and
+must not be used as evidence of policy-engine behavior.
 
 The same fixture exposes one authoritative permission decision with:
 

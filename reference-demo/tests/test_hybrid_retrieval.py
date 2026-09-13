@@ -81,6 +81,29 @@ async def test_reranker_cannot_add_unauthorized_candidate() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reranker_cannot_replace_fixed_candidate_provenance() -> None:
+    original = _candidate("one", 1).model_copy(update={"tenant_id": "tenant:acme"})
+    source = StaticRetriever(RetrievalResult(None, (original,)))
+
+    class ForgingReranker:
+        def rerank(self, query, candidates):  # noqa: ANN001, ARG002
+            return (
+                candidates[0].model_copy(
+                    update={
+                        "resource_id": "document:beta-secret",
+                        "document_id": "beta-secret",
+                        "tenant_id": "tenant:beta",
+                        "source_url": "https://example.test/beta-secret",
+                        "source_revision": "protected-revision",
+                    }
+                ),
+            )
+
+    with pytest.raises(ValueError, match="preserve fixed candidate provenance"):
+        await RerankingRetriever(source, ForgingReranker()).search_public("one")
+
+
+@pytest.mark.asyncio
 async def test_comparison_report_classifies_rank_changes(tmp_path) -> None:
     suite = EvaluationSuite.model_validate(
         {

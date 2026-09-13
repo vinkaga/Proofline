@@ -117,3 +117,28 @@ async def test_demo_check_access_uses_openfga() -> None:
 
     assert result.exit_code == 0
     assert json.loads(result.stdout) == {"allowed": True}
+
+
+@pytest.mark.asyncio
+async def test_normal_query_cli_uses_openfga_inherited_access() -> None:
+    """The ordinary host command must not silently fall back to direct grants."""
+
+    result = await asyncio.to_thread(
+        runner.invoke,
+        app,
+        [
+            "query",
+            "--principal",
+            "user:carla",
+            "--tenant",
+            "tenant:acme",
+            "--resource",
+            "document:acme-secret",
+            "--query",
+            "Can Carla view the Acme incident notes?",
+        ],
+        env={"OPENFGA_URL": OPENFGA_URL or ""},
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["answer"] == "Access is allowed."

@@ -7,12 +7,13 @@ import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+import pytest
 from qdrant_client import QdrantClient
 from typer.testing import CliRunner
 
 import proofline_reference_demo.cli as cli
 from proofline_reference_demo.authorization import StaticAuthorizationAdapter
-from proofline_reference_demo.domain import ScopedResource
+from proofline_reference_demo.domain import Principal, ScopedResource
 
 runner = CliRunner()
 
@@ -306,13 +307,107 @@ def test_demo_multi_hop_prints_clean_and_rejected_poisoned_traces() -> None:
 def test_query_runs_the_bounded_host_flow() -> None:
     result = runner.invoke(
         cli.app,
-        ["query", "--query", "What approval does Acme need for rollout?"],
+        [
+            "query",
+            "--authorization",
+            "static",
+            "--query",
+            "What approval does Acme need for rollout?",
+        ],
     )
 
     trace = json.loads(result.stdout)
     assert result.exit_code == 0
+    assert "fixture-only static" in result.stderr
     assert trace["request_mode"] == "tenant_knowledge"
     assert trace["retrieval_hop_count"] == 2
+
+
+def test_query_defaults_to_a_provisioned_openfga_policy_adapter(monkeypatch) -> None:
+    adapter = StaticAuthorizationAdapter(
+        {
+            ("user:ana", "tenant:acme"): (
+                ScopedResource(tenant_id="tenant:acme", resource_id="document:acme-rollout"),
+            )
+        }
+    )
+    provisioned = SimpleNamespace(adapter=adapter, delete=AsyncMock())
+    provision = AsyncMock(return_value=provisioned)
+    monkeypatch.setattr(cli, "provision_openfga", provision)
+
+    result = runner.invoke(
+        cli.app,
+        ["query", "--openfga-url", "http://openfga.test", "--query", "rollout approval"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["request_mode"] == "tenant_knowledge"
+    provision.assert_awaited_once_with("http://openfga.test")
+    provisioned.delete.assert_awaited_once()
+
+
+def test_serve_mcp_uses_selected_openfga_adapter_lifecycle(monkeypatch) -> None:
+    served = AsyncMock()
+    monkeypatch.setattr(cli, "_serve_permission_mcp", served)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "serve-mcp",
+            "--principal",
+            "user:ana",
+            "--tenant",
+            "tenant:acme",
+            "--openfga-url",
+            "http://openfga.test",
+        ],
+    )
+
+    assert result.exit_code == 0
+    served.assert_awaited_once_with(
+        principal=Principal(id="user:ana"),
+        tenant_id="tenant:acme",
+        authorization="openfga",
+        openfga_url="http://openfga.test",
+    )
+
+
+def test_serve_mcp_static_mode_is_labeled_as_limited(monkeypatch) -> None:
+    served = AsyncMock()
+    monkeypatch.setattr(cli, "_serve_permission_mcp", served)
+
+    result = runner.invoke(cli.app, ["serve-mcp", "--authorization", "static"])
+
+    assert result.exit_code == 0
+    assert "fixture-only static" in result.stderr
+    served.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_receives_the_provisioned_openfga_adapter(monkeypatch) -> None:
+    adapter = object()
+    provisioned = SimpleNamespace(adapter=adapter, delete=AsyncMock())
+    provision = AsyncMock(return_value=provisioned)
+    server = SimpleNamespace(run_stdio_async=AsyncMock())
+    build_server = Mock(return_value=server)
+    monkeypatch.setattr(cli, "provision_openfga", provision)
+    monkeypatch.setattr(cli, "build_permission_server", build_server)
+
+    await cli._serve_permission_mcp(
+        principal=Principal(id="user:carla"),
+        tenant_id="tenant:acme",
+        authorization="openfga",
+        openfga_url="http://openfga.test",
+    )
+
+    provision.assert_awaited_once_with("http://openfga.test")
+    build_server.assert_called_once_with(
+        adapter,
+        principal=Principal(id="user:carla"),
+        tenant_id="tenant:acme",
+    )
+    server.run_stdio_async.assert_awaited_once()
+    provisioned.delete.assert_awaited_once()
 
 
 def test_demo_tenant_search_uses_provisioned_openfga_adapter(monkeypatch) -> None:

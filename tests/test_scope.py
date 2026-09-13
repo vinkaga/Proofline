@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
 
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import proofline.scope as scope_module
 from proofline import (
+    FilterAtom,
     RetrievalScope,
     ScopeError,
     ScopeExpiredError,
@@ -28,6 +31,52 @@ def test_scope_filters_are_immutable() -> None:
     with pytest.raises(TypeError):
         scope.metadata["trace_id"] = "changed"  # type: ignore[index]
     assert scope.metadata == {"trace_id": "trace-123"}
+
+
+def test_unchanged_child_reuses_validated_authority() -> None:
+    root = RetrievalScope.root(
+        principal="user:ana",
+        filters={"tenant_id": ["acme"], "resource_id": ["guide-a", "guide-b"]},
+        metadata={"trace_id": "trace-123"},
+    )
+
+    child = root.attenuate()
+
+    assert child.filters is root.filters
+    assert child.metadata is root.metadata
+
+
+def test_narrowed_child_reuses_unchanged_filter_values() -> None:
+    root = RetrievalScope.root(
+        principal="user:ana",
+        filters={"tenant_id": ["acme"], "resource_id": ["guide-a", "guide-b"]},
+    )
+
+    child = root.attenuate({"resource_id": ["guide-a"]})
+
+    assert child.filters is not root.filters
+    assert child.filters["tenant_id"] is root.filters["tenant_id"]
+    assert child.filters["resource_id"] == frozenset({"guide-a"})
+
+
+def test_descendants_do_not_revalidate_inherited_filter_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_freeze = scope_module._freeze_filter_values
+    freeze_calls = 0
+
+    def count_freezes(values: Iterable[FilterAtom]) -> frozenset[FilterAtom]:
+        nonlocal freeze_calls
+        freeze_calls += 1
+        return original_freeze(values)
+
+    monkeypatch.setattr(scope_module, "_freeze_filter_values", count_freezes)
+
+    root = RetrievalScope.root(principal="user:ana", filters={"resource_id": ["guide-a"]})
+    root.attenuate()
+    root.attenuate({"resource_id": ["guide-a"]})
+
+    assert freeze_calls == 2
 
 
 def test_child_scope_can_only_narrow_existing_allowlists() -> None:
@@ -66,9 +115,22 @@ def test_scope_attenuation_distinguishes_equal_values_of_different_types(
         root.attenuate({"id": [child_value]})
 
 
-def test_scope_rejects_equal_filter_values_with_different_types() -> None:
+@pytest.mark.parametrize(
+    "values",
+    [
+        [1, True],
+        [True, 1],
+        [1, 1.0],
+        [1.0, 1],
+        [False, 0],
+        [0.0, False],
+    ],
+)
+def test_scope_rejects_equal_filter_values_with_different_types(
+    values: list[int | float | bool],
+) -> None:
     with pytest.raises(ScopeError, match="same type"):
-        RetrievalScope.root(principal="user:ana", filters={"id": [1, True]})
+        RetrievalScope.root(principal="user:ana", filters={"id": values})
 
 
 def test_adapter_filter_contract_rejects_unknown_fields_and_matches_conjunctively() -> None:

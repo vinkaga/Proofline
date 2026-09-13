@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from math import isfinite
@@ -20,19 +20,116 @@ ScopeFilters: TypeAlias = Mapping[str, frozenset[FilterAtom]]
 ScopeMetadata: TypeAlias = Mapping[str, str]
 
 
+class _FrozenFilterValues(frozenset[FilterAtom]):
+    """Validated filter values with cached exact-type membership keys."""
+
+    _typed_values: frozenset[tuple[type[object], FilterAtom]]
+
+    def __new__(
+        cls,
+        values: Iterable[FilterAtom],
+        typed_values: frozenset[tuple[type[object], FilterAtom]],
+    ) -> _FrozenFilterValues:
+        frozen = super().__new__(cls, values)
+        frozen._typed_values = typed_values
+        return frozen
+
+
+class _FrozenFilters(Mapping[str, frozenset[FilterAtom]]):
+    """An immutable mapping that marks already validated scope filters."""
+
+    __slots__ = ("_values",)
+
+    def __init__(self, values: Mapping[str, frozenset[FilterAtom]]) -> None:
+        self._values = MappingProxyType(dict(values))
+
+    def __getitem__(self, key: str) -> frozenset[FilterAtom]:
+        return self._values[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+
+class _FrozenMetadata(Mapping[str, str]):
+    """An immutable mapping that marks already validated scope metadata."""
+
+    __slots__ = ("_values",)
+
+    def __init__(self, values: Mapping[str, str]) -> None:
+        self._values = MappingProxyType(dict(values))
+
+    def __getitem__(self, key: str) -> str:
+        return self._values[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+
+def _values_compare_equal_across_types(
+    value: FilterAtom,
+    *,
+    integers: set[int],
+    integral_floats: set[int],
+    booleans: set[bool],
+) -> bool:
+    """Return whether ``value`` equals a previously seen value of another type.
+
+    Filter atoms have only five supported types.  The only cross-type equality
+    possible between them is the numeric relationship among ``bool``, ``int``,
+    and finite integral ``float`` values.  Tracking that relationship directly
+    avoids pairwise comparisons as an allowlist grows.
+    """
+
+    if isinstance(value, bool):
+        return int(value) in integers or int(value) in integral_floats
+    if isinstance(value, int):
+        return (value in (0, 1) and bool(value) in booleans) or value in integral_floats
+    if isinstance(value, float) and value.is_integer():
+        integer_value = int(value)
+        return integer_value in integers or (
+            integer_value in (0, 1) and bool(integer_value) in booleans
+        )
+    return False
+
+
 def _freeze_filter_values(values: Iterable[FilterAtom]) -> frozenset[FilterAtom]:
     """Validate and freeze filter atoms without conflating scalar types."""
 
     validated: list[FilterAtom] = []
+    typed_values: set[tuple[type[object], FilterAtom]] = set()
+    integers: set[int] = set()
+    integral_floats: set[int] = set()
+    booleans: set[bool] = set()
     for value in values:
         if type(value) not in (str, int, float, bool, type(None)):
             raise ScopeError("filter values must be strings, integers, floats, booleans, or null")
         if isinstance(value, float) and not isfinite(value):
             raise ScopeError("filter float values must be finite")
-        if any(type(value) is not type(existing) and value == existing for existing in validated):
+        typed_value = (type(value), value)
+        if typed_value in typed_values:
+            continue
+        if _values_compare_equal_across_types(
+            value,
+            integers=integers,
+            integral_floats=integral_floats,
+            booleans=booleans,
+        ):
             raise ScopeError("filter values that compare equal must have the same type")
         validated.append(value)
-    return frozenset(validated)
+        typed_values.add(typed_value)
+        if isinstance(value, bool):
+            booleans.add(value)
+        elif isinstance(value, int):
+            integers.add(value)
+        elif isinstance(value, float) and value.is_integer():
+            integral_floats.add(int(value))
+    return _FrozenFilterValues(validated, frozenset(typed_values))
 
 
 def _typed_filter_values(
@@ -40,6 +137,8 @@ def _typed_filter_values(
 ) -> frozenset[tuple[type[object], FilterAtom]]:
     """Return filter values keyed by their exact runtime scalar type."""
 
+    if isinstance(values, _FrozenFilterValues):
+        return values._typed_values
     return frozenset((type(value), value) for value in values)
 
 
@@ -87,15 +186,14 @@ def matches_scope_filters(
         candidate_value = candidate.get(field_name, _MISSING_FILTER_VALUE)
         if candidate_value is _MISSING_FILTER_VALUE or not permitted_values:
             return False
-        if not any(
-            type(candidate_value) is type(permitted_value) and candidate_value == permitted_value
-            for permitted_value in permitted_values
-        ):
+        if (type(candidate_value), candidate_value) not in _typed_filter_values(permitted_values):
             return False
     return True
 
 
 def _freeze_filters(filters: Mapping[str, Iterable[FilterAtom]]) -> ScopeFilters:
+    if isinstance(filters, _FrozenFilters):
+        return filters
     frozen: dict[str, frozenset[FilterAtom]] = {}
     for field_name, values in filters.items():
         if not isinstance(field_name, str) or not field_name:
@@ -103,10 +201,12 @@ def _freeze_filters(filters: Mapping[str, Iterable[FilterAtom]]) -> ScopeFilters
         if isinstance(values, (str, bytes)):
             raise ScopeError("filter values must be an iterable of scalar values, not a string")
         frozen[field_name] = _freeze_filter_values(values)
-    return MappingProxyType(frozen)
+    return _FrozenFilters(frozen)
 
 
 def _freeze_metadata(metadata: Mapping[str, str]) -> ScopeMetadata:
+    if isinstance(metadata, _FrozenMetadata):
+        return metadata
     frozen: dict[str, str] = {}
     for key, value in metadata.items():
         if not isinstance(key, str) or not key:
@@ -114,7 +214,7 @@ def _freeze_metadata(metadata: Mapping[str, str]) -> ScopeMetadata:
         if not isinstance(value, str):
             raise ScopeError("metadata values must be strings")
         frozen[key] = value
-    return MappingProxyType(frozen)
+    return _FrozenMetadata(frozen)
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,17 +299,23 @@ class RetrievalScope:
         if self.max_follow_ups is not None and self.follow_up_count >= self.max_follow_ups:
             raise ScopeError("retrieval scope has exhausted its follow-up budget")
         requested = _freeze_filters(narrowing_filters or {})
-        child_filters = dict(self.filters)
+        updated_filters: dict[str, frozenset[FilterAtom]] | None = None
         for field_name, child_values in requested.items():
             parent_values = self.filters.get(field_name)
             if parent_values is not None and not _typed_filter_values(child_values).issubset(
                 _typed_filter_values(parent_values)
             ):
                 raise ScopeError(f"child scope widens filter {field_name!r}")
-            child_filters[field_name] = child_values
+            if updated_filters is None:
+                updated_filters = dict(self.filters)
+            updated_filters[field_name] = child_values
         return RetrievalScope(
             principal=self.principal,
-            filters=_freeze_filters(child_filters),
+            filters=(
+                _FrozenFilters(updated_filters)
+                if updated_filters is not None
+                else self.filters
+            ),
             metadata=self.metadata,
             policy_version=self.policy_version,
             expires_at=self.expires_at,

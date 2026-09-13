@@ -3,24 +3,71 @@
 
 # Proofline
 
-Capability-attenuating retrieval for permission-preserving multi-hop RAG.
+Keep your RAG app's searches within the data each user is allowed to access.
 
-Proofline prevents a multi-hop RAG planner from expanding retrieval authority through retrieved content, while preserving ordinary authorized follow-up retrieval.
+Your RAG app may search a shared document collection, but each user should only
+receive information from documents they're allowed to read. If an agent runs
+additional searches to answer a question, those searches need the same access
+restrictions.
 
-Proofline is a small Python library that wraps an application's existing
-retriever. Trusted application code supplies the caller context; on every
-retrieval hop, Proofline derives and applies the corresponding authorization
-filters. The model and retrieved documents may propose a query, but cannot
-broaden who, where, or what that query may retrieve.
+Proofline automatically passes your application's permission filters to every
+search through its wrapper, including agent follow-ups. You keep your existing
+retriever.
 
-It is not a RAG framework, agent runtime, vector store, or prompt-injection
-detector. It protects retrieval calls routed through its wrapper; it does not
-secure direct backend calls or decide whether content is factually trustworthy.
+It is a small, MIT-licensed Python library. The permitted tenants, projects, or
+document IDs, together with the caller's identity, form a **retrieval scope**.
+
+## What you get
+
+- Permission filters supplied to every search through the wrapper, including
+  follow-ups, so you do not have to pass them along manually at each step.
+- Follow-ups that keep the previous search's access limits. Your application
+  can narrow those limits, but a model or retrieved document cannot widen them.
+- A wrapper around your existing retriever, with your framework and document
+  types unchanged.
+
+Your application still identifies the user and decides what they may access.
+Your retrieval backend must enforce the filters Proofline supplies. The model
+can suggest a search query; it cannot choose whose permissions to use.
+
+Proofline is useful when your RAG app or agent searches data with different
+access rules for different users or tasks. It protects calls made through its
+wrapper; it does not secure direct backend calls, detect prompt injection, or
+decide whether retrieved content is trustworthy.
+
+### Comparison with access filtering alone
+
+The following results come from the
+[50-case benchmark with synthetic permissions and search proposals](reference-demo/benchmark-results/hotpotqa-distractor-dev-v1/bm25-k5-scope-overlay-v1.md).
+Higher is better in every row. These are fixture results, not general attack
+success rates. ACL filtering means applying access-control rules to each search.
+
+| Measure | Intentionally insecure control | ACL filtering on every hop | Proofline |
+| --- | ---: | ---: | ---: |
+| Cases where no unauthorized evidence was exposed | 0% | 100% | 100% |
+| Proposals containing permission-setting fields rejected before search | 0% | 0% | 100% |
+| Follow-ups with a complete record of inherited access restrictions | 0% | 0% | 100% |
+
+Permission-setting fields include a caller identity, tenant, or resource filter.
+These must come from trusted application code. The rejection measure applies
+only to proposals containing those forbidden fields; ordinary query-only
+proposals remain accepted in the Proofline fixture.
+
+Both ACL filtering on every hop and Proofline prevent unauthorized evidence
+exposure in this fixture. Proofline also rejects invalid proposals before
+search and records how each follow-up inherits its access restrictions. These
+are additional enforcement and traceability properties, not a measured reduction
+in exposure compared with the ACL-filtered control.
 
 ## Quickstart
 
-Wrap the retriever you already have. Only trusted application code creates the
-scope; queries from a model or a document cannot supply filters.
+From a repository checkout, install the core development environment with
+`uv sync`.
+
+In this example, your application has already authenticated the user and resolved
+the document IDs they may access. `request.authorized_resource_ids` comes from
+that trusted authorization step, not from user input or a model response.
+`resolve_scope` packages those permissions for Proofline:
 
 ```python
 from proofline import RetrievalScope, scoped
@@ -34,18 +81,62 @@ def resolve_scope(request) -> RetrievalScope:
 
 
 retriever = scoped(existing_retriever.search, resolve_scope=resolve_scope)
-results = await retriever.search("rollout prerequisites", context=request)
+request_retriever = await retriever.bind(request)
+results = await request_retriever.search("rollout prerequisites")
 ```
 
-For a model-proposed follow-up, parse the proposal then call
-`follow_proposed(previous_results, proposal)`. Only trusted host code may use
-`follow_up_trusted(..., narrowing_filters=...)`.
+The wrapped search function must accept `query`, keyword-only `filters`, and
+`limit`, and enforce the filters before returning results. Framework retrievers
+often need a small adapter because their parameter names and filter formats
+differ. See the [backend filter contract](#backend-filter-contract) below.
+
+Pass `request_retriever.search` to an agent tool or application service. Every
+call uses the same trusted permissions resolved at `bind()` time; independent
+searches are not artificially recorded as a parent/child chain. Trusted
+application code can create a narrower branch with
+`request_retriever.narrow_trusted(...)`.
+
+For an explicit, audited retrieval tree, parse a model proposal and call
+`follow_proposed(previous_results, proposal)`. Proofline uses the previous
+results' scope for that child search. Only trusted application code may use
+`follow_up_trusted(..., narrowing_filters=...)` to restrict it further.
+
+### Checkpoint and resume a retrieval branch
+
+Persist a branch's authority separately from retrieved documents. Supply a
+stable, trusted binding that identifies the authenticated caller and the agent
+task; do not derive it from model or client input.
+
+```python
+binding = {"principal": request.user_id, "task_id": task.id}
+checkpoint = request_retriever.to_checkpoint(binding=binding)
+
+# Later, after loading the checkpoint from trusted host storage:
+request_retriever = await retriever.resume(
+    checkpoint,
+    context=request,
+    binding=binding,
+)
+results = await request_retriever.search("continue the investigation")
+```
+
+Checkpoints are versioned JSON-safe data, not bearer credentials. On resume,
+Proofline checks the binding, resolves the caller's current authorization, and
+rejects a saved branch that is broader than current access. It also preserves
+the saved branch's restrictions while applying any earlier current expiry or
+lower current follow-up limit. Store checkpoints where the caller cannot alter
+them; a model, browser client, or retrieved document must never supply one.
+
+The [LangGraph example](examples/langgraph/) shows this contract in graph state:
+it checkpoints scope data rather than `ScopedResults` or retrieved documents,
+then restores the branch before its follow-up node searches.
 
 ## Backend filter contract
 
-The wrapped backend is part of the authorization boundary. It must reject
-fields it has not implemented and match every supplied field conjunctively;
-an empty allowlist must match nothing. `validate_scope_filter_fields` and
+Proofline supplies the filters; the backend is responsible for applying them.
+It must reject filter fields it does not support, require every supplied field
+to match, and return no matches for an empty list of permitted values.
+`validate_scope_filter_fields` and
 `matches_scope_filters` provide this contract for adapters whose candidate
 metadata can be represented as scalar fields:
 
@@ -74,25 +165,39 @@ backend needs a public-content exception, represent that content in the trusted
 root allowlists or use a separate public retrieval path; do not bypass supplied
 filters while selecting candidates.
 
+### Access-state semantics
+
+Proofline makes the three access outcomes explicit:
+
+- `RetrievalScope.root(..., filters={...})` creates a constrained scope. An
+  empty filter mapping is rejected, so a failed authorization lookup cannot
+  accidentally become an unrestricted search.
+- A named empty allowlist, such as `{"resource_id": []}`, is deny-all for that
+  field. Backends must return no matching records.
+- `RetrievalScope.unrestricted(...)` is the only way to create a scope with no
+  filters. Use it only when trusted host code has deliberately established that
+  every document reachable through that backend is public to the caller—not
+  when authorization is missing or grants are empty.
+
+An unrestricted scope may later be narrowed. For example,
+`unrestricted_scope.attenuate({"resource_id": []})` becomes a deny-all scoped
+branch rather than retaining unrestricted access.
+
 ## The problem
 
-Most retrieval demos answer questions from a document collection. An
-enterprise assistant has a harder contract: it must find the right evidence,
-enforce what the caller is allowed to see or do, use authoritative systems for
-decisions, and make regressions visible before release.
+A document can be relevant to a question without being available to the user
+asking it. Access restrictions must apply whenever an assistant searches,
+including when it follows a reference in a document or asks a second question.
 
-Proofline is a small, inspectable reference system for that contract. It is
-not a general-purpose chatbot or a benchmark for model intelligence.
+Proofline centralizes the work of carrying those restrictions between retrieval
+steps. A follow-up receives the same or narrower scope as its parent. Switching
+to a broader scope requires a separate authorization operation in trusted
+application code.
 
-Its defining invariant is:
-
-> Retrieval provides evidence. An authorization service decides what a
-> principal may retrieve or do. The assistant cannot override either boundary.
-
-Its defining scope-propagation rule is:
-
-> Retrieved content may provide evidence, but it cannot implicitly expand the
-> caller's retrieval authority.
+The repository's reference demonstration also explores evidence quality,
+authoritative permission decisions, and regression testing. Those experiments
+support the library; they do not make it a chatbot or a benchmark for model
+intelligence.
 
 ## Reference demonstration
 
@@ -306,23 +411,24 @@ def resolve_scope(request_context: RequestContext) -> RetrievalScope:
 
 
 retriever = scoped(existing_retriever.search, resolve_scope=resolve_scope)
-results = await retriever.search(
-    "rollout prerequisites",
-    context=request_context_from_authenticated_user,
-    limit=5,
-)
+request_retriever = await retriever.bind(request_context_from_authenticated_user)
+results = await request_retriever.search("rollout prerequisites", limit=5)
 ```
 
-The lower-level explicit scope API remains available for trees, parallel workers,
-and custom policy flows, but ordinary users should not manage scope algebra. A
-host may provide `validate_scope` to recheck revocation before every retrieval
-call, and may set `max_follow_ups` on a root scope when it needs a bounded
-branch. Scope expiry is checked again immediately before backend dispatch,
-including after an asynchronous validator returns; it does not cancel an
-already-dispatched backend call. Both controls are optional and disabled by
-default. A root may also carry immutable string `metadata` such as a trace or
-request ID; metadata is propagated unchanged and is never used to grant
-retrieval authority.
+For an ordinary agent or RAG request, bind once and pass the bound retriever's
+query-only `search` method to the tool or service. Independent searches share
+that immutable authorized branch, including when they run concurrently. The
+bound handle adds no mutable run state; your backend client remains responsible
+for its own concurrency guarantees. The
+lower-level explicit-parent API remains available for trees, parallel workers,
+and custom policy flows; ordinary users should not manage scope algebra. A host
+may provide `validate_scope` to recheck revocation before every retrieval call,
+and may set `max_follow_ups` on a root scope when it needs a bounded branch.
+Scope expiry is checked again immediately before backend dispatch, including
+after an asynchronous validator returns; it does not cancel an already-dispatched
+backend call. Both controls are optional and disabled by default. A root may
+also carry immutable string `metadata` such as a trace or request ID; metadata
+is propagated unchanged and is never used to grant retrieval authority.
 Underneath, the wrapper targets the ordinary Python retrieval shape: a sync or
 async callable/protocol that accepts `query`, enforced `filters`, and `limit`.
 Synchronous callbacks run on the calling event loop. For a thread-safe blocking
@@ -374,9 +480,9 @@ set.
 
 #### Keep every result reproducible
 
-The corpus snapshot, chunking configuration, embedding model, retriever
-configuration, reranker, prompt version, model version, and evaluation set are
-recorded with each run.
+Corpus, evaluation-suite, retrieval-method, and embedding-provider versions are
+recorded by the evaluation artifacts that use them. The demo has no prompt or
+chat-model version because it makes no runtime model call.
 
 ## Reference-demo flow
 
@@ -419,10 +525,10 @@ allowlist further constrains tenant-scoped retrieval. This makes access control
 a property of every retrieval hop, not a filter applied after an LLM has seen
 the results.
 
-Question classification can be deterministic. The demonstration uses an LLM
-only for bounded query reformulation and response composition. That separation
-makes the access boundary and the host's additional value easy to inspect and
-test.
+Question classification, planner fixtures, and response composition are
+deterministic. The reference demonstration makes no runtime LLM call. Its
+responses acknowledge cited evidence or abstain; they are not answer-quality
+or generation evaluations.
 
 ## Reference-demo retrieval experiments
 
@@ -456,6 +562,9 @@ accuracy or universal poisoning claim. The
 [versioned result report](reference-demo/benchmark-results/hotpotqa-distractor-dev-v1/bm25-k5-scope-overlay-v1.md)
 records its exact data hash, configuration, and control comparison.
 
+See the [comparison with access filtering alone](#comparison-with-access-filtering-alone)
+near the top of this README for the reported results.
+
 To reproduce the public-data gate locally, download the artifact named by its
 manifest, then run the evaluator; it verifies the recorded SHA-256 before
 parsing the file:
@@ -472,7 +581,7 @@ uv run proofline-reference-demo evaluate-hotpotqa \
 | --- | --- | --- |
 | Access isolation | Protected content stays out of unauthorized retrieval and prompts | unauthorized-chunk exposure rate, cross-tenant leakage pass rate |
 | Retrieval | Whether permitted relevant evidence appears in the candidate set and near the top | ACL-filtered Recall@k, MRR, nDCG |
-| Grounding | Whether answer claims are supported by returned sources | deterministic citation validation plus calibrated rubric |
+| Evidence provenance | Whether returned chunks have reviewed source metadata | deterministic citation-provenance checks |
 | Abstention | Whether unsupported or ambiguous questions avoid invented answers | exact expected outcome |
 | Tool behavior | Whether access questions call the tool with correct arguments | tool-call and result assertions |
 | Authorization | Whether allowed and denied cases match the policy model | exact expected decision |
@@ -490,8 +599,6 @@ Initial case categories:
 - Unsupported questions that require abstention.
 - Allowed and denied access checks.
 - Tool-required questions where retrieved text alone would be insufficient.
-- Ambiguous queries where one reformulation is useful, and cases where it must
-  not be attempted.
 - Cross-tenant, partial-access, and identifier-guessing probes.
 - Authorized shared documents containing realistic instruction-like
   cross-references, to test that documents are evidence rather than authority.
@@ -519,35 +626,27 @@ new method loses, provided the evaluation explains why.
 
 ## Reference-demo trace record
 
-Each evaluated interaction should write a structured record with:
+The current generated evidence artifacts contain the following safe fields when
+their workflow produces them:
 
 - case and corpus version;
 - request mode and resolved access scope;
-- root/parent/child scope identifiers, policy version, and allow/deny/requires-
-  approval decision for every proposed retrieval step;
+- scope lineage references and rejected proposal fields for scope-gate traces;
 - retrieval method, candidates, ranks, and scores;
 - the permitted chunk IDs supplied to response context;
 - evidence provenance, including source revision and parent retrieval step;
 - host decision and tool calls with redacted inputs and outputs;
-- final answer, citations, and abstention state;
-- latency and token or cost metadata when applicable; and
-- deterministic checks and model-grader results.
+- cited-evidence response or abstention state; and
+- deterministic gate results.
 
 No secrets, private documents, or personal data belong in the repository.
 
 ## Reference-demo operational view
 
-The evaluation runner produces a compact quality view for each corpus and
-configuration version: pass rate by request mode, ACL-filtered retrieval
-metrics, unauthorized exposure, access denials, abstentions, reformulation
-rate, tool failures, latency, and change from baseline. This is intentionally a
-small operational surface, not a full observability platform. Its purpose is to
-make a regression or unexpected trade-off visible quickly.
-
-Every retrieval comparison also reports ingestion time and cost per 1,000
-chunks, estimated query, reranking, and response cost per 1,000 queries, and
-p50 and p95 latency. Extrapolations are labeled as such and derived from the
-measured corpus and documented model pricing.
+The evaluation commands report the metrics their writers actually compute:
+retrieval quality, unauthorized exposure, provenance checks, and latency where
+the relevant retrieval evaluator measures it. They do not currently produce a
+complete per-run cost, token, answer-quality, or regression-delta report.
 
 ## Technology choices
 
@@ -567,7 +666,7 @@ measured corpus and documented model pricing.
 | Retrieval | BM25, Qdrant, and `qdrant-client` | Compares lexical, dense, hybrid, and reranked retrieval under the same filters. |
 | Tool boundary | Official MCP Python SDK | Demonstrates an authoritative `check_access` tool. |
 | Configuration | Pydantic Settings and local `.env` | Configures the demonstration only; the core library never reads host environment or secret files. |
-| Evaluation | `pytest` and `ir_measures` | Provides deterministic assertions and standard retrieval metrics. |
+| Evaluation | `pytest` and local metric implementations | Provides deterministic assertions and Recall@k, MRR, and nDCG calculations. |
 | Traces | OpenTelemetry and Phoenix | Supports trace visualization; the structured trace remains the source artifact. |
 
 Embedding and reranker providers are demonstration components selected by
@@ -718,9 +817,11 @@ OPENFGA_URL=http://localhost:8080 uv run pytest -m integration --no-cov
 ```
 
 The focused integration command disables the repository-wide coverage gate;
-run `uv run pytest` without test selection to enforce the 85% coverage threshold.
+run `uv run pytest` without test selection to enforce the 85% combined coverage
+threshold computed by coverage.py across statements and branches.
 
-The test suite enforces more than 85% branch coverage.
+Branch collection is enabled to expose untested decision paths, but CI does not
+currently enforce a separate branch-only percentage threshold.
 
 ## How to extend it
 

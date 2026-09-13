@@ -4,6 +4,7 @@
 
 from proofline.proposed_step import ProposedRetrievalStep, ProposedStepError
 from proofline.retrieval import (
+    BoundScopedRetriever,
     FilteredSearch,
     ScopedResults,
     ScopedRetriever,
@@ -16,6 +17,8 @@ from proofline.retrieval import (
 from proofline.scope import (
     FilterAtom,
     RetrievalScope,
+    ScopeCheckpoint,
+    ScopeCheckpointError,
     ScopeError,
     ScopeExpiredError,
     ScopeFilters,
@@ -30,12 +33,15 @@ __all__ = [
     "RetrievalScope",
     "FilterAtom",
     "ScopeFilters",
+    "ScopeCheckpoint",
     "ScopeMetadata",
     "matches_scope_filters",
     "validate_scope_filter_fields",
     "ScopeError",
     "ScopeExpiredError",
+    "ScopeCheckpointError",
     "ScopeValidationError",
+    "BoundScopedRetriever",
     "ScopeResolver",
     "ScopeValidator",
     "offload_sync",

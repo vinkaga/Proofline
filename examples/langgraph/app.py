@@ -4,20 +4,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from proofline_example_host import Evidence, TrustedRequest, retriever
+from proofline_example_host import TrustedRequest, retriever
 
-from proofline import ProposedRetrievalStep, ScopedResults
+from proofline import ProposedRetrievalStep
 
 
 class RetrievalState(TypedDict):
     query: str
     planner_output: dict[str, object] | None
     resource_ids: tuple[str, ...]
-    initial: ScopedResults[Evidence] | None
+    scope_checkpoint: dict[str, object] | None
     scope_id: str | None
     parent_scope_id: str | None
 
@@ -31,16 +32,22 @@ class GraphResult:
     parent_scope_id: str | None
 
 
-def build_graph(request: TrustedRequest):
+def build_graph(
+    request: TrustedRequest,
+    *,
+    checkpoint_binding: Mapping[str, str] | None = None,
+    checkpointer: object | None = None,
+):
     """Capture trusted request context outside graph/model-visible state."""
 
     boundary = retriever()
+    binding = dict(checkpoint_binding or {"principal": request.principal})
 
     async def retrieve_node(state: RetrievalState) -> dict[str, object]:
         initial = await boundary.search(state["query"], context=request)
         return {
-            "initial": initial,
             "resource_ids": tuple(item.resource_id for item in initial.items),
+            "scope_checkpoint": initial.scope.to_checkpoint(binding=binding),
             "scope_id": initial.scope.scope_id,
             "parent_scope_id": initial.scope.parent_scope_id,
         }
@@ -49,12 +56,13 @@ def build_graph(request: TrustedRequest):
         return "follow" if state["planner_output"] is not None else "end"
 
     async def follow_node(state: RetrievalState) -> dict[str, object]:
-        initial = state["initial"]
+        checkpoint = state["scope_checkpoint"]
         planner_output = state["planner_output"]
-        if initial is None or planner_output is None:
+        if checkpoint is None or planner_output is None:
             raise RuntimeError("follow-up node requires initial results and a planner proposal")
         step = ProposedRetrievalStep.from_untrusted(planner_output)
-        follow_up = await boundary.follow_proposed(initial, step)
+        resumed = await boundary.resume(checkpoint, context=request, binding=binding)
+        follow_up = await resumed.narrow_trusted().search(step.query)
         return {
             "resource_ids": tuple(item.resource_id for item in follow_up.items),
             "scope_id": follow_up.scope.scope_id,
@@ -68,7 +76,7 @@ def build_graph(request: TrustedRequest):
         .add_edge(START, "retrieve")
         .add_conditional_edges("retrieve", after_initial, {"follow": "follow", "end": END})
         .add_edge("follow", END)
-        .compile()
+        .compile(checkpointer=checkpointer)
     )
 
 
@@ -85,7 +93,7 @@ async def run(
             "query": query,
             "planner_output": planner_output,
             "resource_ids": (),
-            "initial": None,
+            "scope_checkpoint": None,
             "scope_id": None,
             "parent_scope_id": None,
         }

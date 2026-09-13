@@ -8,8 +8,11 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from proofline import (
+    BoundScopedRetriever,
     ProposedRetrievalStep,
     RetrievalScope,
+    ScopeCheckpointError,
+    ScopedResults,
     ScopeError,
     ScopeExpiredError,
     ScopeValidationError,
@@ -38,6 +41,172 @@ def test_wrapper_derives_filters_from_trusted_context() -> None:
 
     assert results.items == ("permitted-result",)
     assert calls == [("rollout prerequisites", results.scope.filters, 3)]
+
+
+def test_bound_retriever_resolves_trusted_context_once_for_independent_searches() -> None:
+    resolver_calls = 0
+    backend_calls: list[str] = []
+
+    def resolve_scope(context: str) -> RetrievalScope:
+        nonlocal resolver_calls
+        resolver_calls += 1
+        return RetrievalScope.root(
+            principal=context,
+            filters={"resource_id": ["guide-a"]},
+            max_follow_ups=0,
+        )
+
+    def backend(query: str, *, filters: object, limit: int) -> list[str]:  # noqa: ARG001
+        backend_calls.append(query)
+        return [query]
+
+    retriever = scoped(backend, resolve_scope=resolve_scope)
+
+    async def run() -> tuple[
+        BoundScopedRetriever[str], ScopedResults[str], ScopedResults[str]
+    ]:
+        bound = await retriever.bind("user:ana")
+        first, second = await asyncio.gather(bound.search("first"), bound.search("second"))
+        return bound, first, second
+
+    bound, first, second = asyncio.run(run())
+
+    assert resolver_calls == 1
+    assert first.scope is bound.scope
+    assert second.scope is bound.scope
+    assert first.scope.follow_up_count == 0
+    assert backend_calls == ["first", "second"]
+
+    with pytest.raises(TypeError):
+        asyncio.run(bound.search("third", filters={"resource_id": ["guide-b"]}))  # type: ignore[call-arg]
+
+
+def test_bound_retriever_can_create_a_trusted_narrowed_branch() -> None:
+    retriever = scoped(
+        lambda query, *, filters, limit: [query],
+        resolve_scope=lambda context: RetrievalScope.root(  # noqa: ARG005
+            principal="user:ana",
+            filters={"resource_id": ["guide-a", "guide-b"]},
+        ),
+    )
+
+    async def run() -> tuple[BoundScopedRetriever[str], ScopedResults[str]]:
+        bound = await retriever.bind(None)
+        narrowed = bound.narrow_trusted({"resource_id": ["guide-a"]})
+        return bound, await narrowed.search("second")
+
+    bound, result = asyncio.run(run())
+
+    assert result.scope.parent_scope_id == bound.scope.scope_id
+    assert result.scope.filters["resource_id"] == frozenset({"guide-a"})
+    assert bound.scope.filters["resource_id"] == frozenset({"guide-a", "guide-b"})
+
+
+def test_resume_restores_a_bound_branch_after_rechecking_current_authorization() -> None:
+    def resolve_scope(context: frozenset[str]) -> RetrievalScope:
+        return RetrievalScope.root(principal="user:ana", filters={"resource_id": context})
+
+    retriever = scoped(
+        lambda query, *, filters, limit: [query],
+        resolve_scope=resolve_scope,
+    )
+
+    async def run() -> tuple[BoundScopedRetriever[str], ScopedResults[str]]:
+        initial = await retriever.bind(frozenset({"guide-a", "guide-b"}))
+        narrowed = initial.narrow_trusted({"resource_id": ["guide-a"]})
+        checkpoint = narrowed.to_checkpoint(
+            binding={"principal": "user:ana", "task_id": "task-123"}
+        )
+        resumed = await retriever.resume(
+            checkpoint,
+            context=frozenset({"guide-a", "guide-b"}),
+            binding={"principal": "user:ana", "task_id": "task-123"},
+        )
+        return resumed, await resumed.search("continued")
+
+    resumed, result = asyncio.run(run())
+
+    assert result.scope == resumed.scope
+    assert result.scope.filters["resource_id"] == frozenset({"guide-a"})
+    assert result.scope.follow_up_count == 1
+
+
+def test_resume_rejects_a_saved_scope_broader_than_current_authorization() -> None:
+    def resolve_scope(context: frozenset[str]) -> RetrievalScope:
+        return RetrievalScope.root(principal="user:ana", filters={"resource_id": context})
+
+    retriever = scoped(
+        lambda query, *, filters, limit: [query],
+        resolve_scope=resolve_scope,
+    )
+
+    async def run() -> None:
+        initial = await retriever.bind(frozenset({"guide-a", "guide-b"}))
+        checkpoint = initial.to_checkpoint(
+            binding={"principal": "user:ana", "task_id": "task-123"}
+        )
+        await retriever.resume(
+            checkpoint,
+            context=frozenset({"guide-a"}),
+            binding={"principal": "user:ana", "task_id": "task-123"},
+        )
+
+    with pytest.raises(ScopeCheckpointError, match="broader"):
+        asyncio.run(run())
+
+
+def test_resume_applies_a_stricter_current_follow_up_limit() -> None:
+    def resolve_scope(context: int) -> RetrievalScope:
+        return RetrievalScope.root(
+            principal="user:ana",
+            filters={"resource_id": ["guide-a"]},
+            max_follow_ups=context,
+        )
+
+    retriever = scoped(lambda query, *, filters, limit: [query], resolve_scope=resolve_scope)
+
+    async def run() -> BoundScopedRetriever[str]:
+        initial = await retriever.bind(3)
+        checkpoint = initial.to_checkpoint(
+            binding={"principal": "user:ana", "task_id": "task-123"}
+        )
+        return await retriever.resume(
+            checkpoint,
+            context=1,
+            binding={"principal": "user:ana", "task_id": "task-123"},
+        )
+
+    resumed = asyncio.run(run())
+
+    assert resumed.scope.max_follow_ups == 1
+
+
+def test_resume_applies_an_earlier_current_expiry() -> None:
+    def resolve_scope(context: datetime) -> RetrievalScope:
+        return RetrievalScope.root(
+            principal="user:ana",
+            filters={"resource_id": ["guide-a"]},
+            expires_at=context,
+        )
+
+    retriever = scoped(lambda query, *, filters, limit: [query], resolve_scope=resolve_scope)
+    saved_expiry = datetime(2031, 1, 1, tzinfo=timezone.utc)
+    current_expiry = datetime(2030, 1, 1, tzinfo=timezone.utc)
+
+    async def run() -> BoundScopedRetriever[str]:
+        initial = await retriever.bind(saved_expiry)
+        checkpoint = initial.to_checkpoint(
+            binding={"principal": "user:ana", "task_id": "task-123"}
+        )
+        return await retriever.resume(
+            checkpoint,
+            context=current_expiry,
+            binding={"principal": "user:ana", "task_id": "task-123"},
+        )
+
+    resumed = asyncio.run(run())
+
+    assert resumed.scope.expires_at == current_expiry
 
 
 def test_follow_up_inherits_scope_and_rejects_widening() -> None:

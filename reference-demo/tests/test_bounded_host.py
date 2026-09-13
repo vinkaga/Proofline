@@ -8,6 +8,7 @@ from proofline_reference_demo.bounded_host import run_bounded_host
 from proofline_reference_demo.domain import Principal, RequestMode, ScopedResource
 from proofline_reference_demo.permission_mcp import build_permission_server, check_access_via_mcp
 from proofline_reference_demo.request_routing import classify_request
+from proofline_reference_demo.retrieval import DocumentChunk
 
 
 def _authorization() -> StaticAuthorizationAdapter:
@@ -98,3 +99,60 @@ def test_bounded_host_uses_mcp_for_denied_permission_without_retrieval() -> None
     assert trace.answer == "Access is denied."
     assert trace.tool_calls == ("check_access",)
     assert trace.retrieval_hop_count == 0
+
+
+def test_bounded_host_public_route_excludes_an_authorized_protected_match() -> None:
+    """Public routing must not borrow the caller's tenant-scoped candidate set."""
+
+    chunks = (
+        DocumentChunk(
+            "public-rollout",
+            "document:public-rollout",
+            None,
+            "Public rollout overview.",
+            is_public=True,
+            document_id="public-rollout",
+            source_url="https://example.test/public-rollout",
+            source_revision="revision",
+        ),
+        DocumentChunk(
+            "acme-rollout",
+            "document:acme-rollout",
+            "tenant:acme",
+            "Acme rollout rollout rollout details.",
+            document_id="acme-rollout",
+            source_url="https://example.test/acme-rollout",
+            source_revision="revision",
+        ),
+    )
+
+    trace = asyncio.run(
+        run_bounded_host(
+            _authorization(),
+            principal=Principal(id="user:ana"),
+            tenant_id="tenant:acme",
+            query="What is Acme rollout?",
+            chunks=chunks,
+        )
+    )
+
+    assert trace.request_mode is RequestMode.PUBLIC_DOCUMENTATION
+    assert trace.candidate_chunk_ids == ("public-rollout",)
+    assert trace.citation_chunk_ids == ("public-rollout",)
+    assert trace.retrieval_hop_count == 1
+    assert trace.scope_ids == ()
+
+
+def test_bounded_host_public_route_uses_public_only_fixture_without_corpus_override() -> None:
+    trace = asyncio.run(
+        run_bounded_host(
+            _authorization(),
+            principal=Principal(id="user:ana"),
+            tenant_id="tenant:acme",
+            query="What is Acme rollout?",
+        )
+    )
+
+    assert trace.request_mode is RequestMode.PUBLIC_DOCUMENTATION
+    assert "chunk:acme-rollout" not in trace.candidate_chunk_ids
+    assert all(not chunk_id.startswith("chunk:beta") for chunk_id in trace.candidate_chunk_ids)

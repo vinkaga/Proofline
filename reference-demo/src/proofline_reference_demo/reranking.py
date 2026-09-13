@@ -56,7 +56,7 @@ class TokenCoverageReranker:
 
 
 class RerankingRetriever:
-    """Enforce that a reranker returns a permutation of fixed candidates only."""
+    """Enforce that a reranker changes only order and scoring of fixed evidence."""
 
     def __init__(self, retriever: AccessGatedRetriever, reranker: Reranker) -> None:
         self._retriever = retriever
@@ -73,8 +73,26 @@ class RerankingRetriever:
 
     def _rerank(self, query: str, result: RetrievalResult) -> RetrievalResult:
         candidates = self._reranker.rerank(query, result.candidates)
-        if {candidate.chunk_id for candidate in candidates} != {
-            candidate.chunk_id for candidate in result.candidates
-        } or len(candidates) != len(result.candidates):
+        originals = {candidate.chunk_id: candidate for candidate in result.candidates}
+        if set(candidate.chunk_id for candidate in candidates) != set(originals) or len(
+            candidates
+        ) != len(originals):
             raise ValueError("reranker must return each fixed candidate exactly once")
+        if any(
+            _provenance(candidate) != _provenance(originals[candidate.chunk_id])
+            for candidate in candidates
+        ):
+            raise ValueError("reranker must preserve fixed candidate provenance")
         return RetrievalResult(result.access_scope, candidates)
+
+
+def _provenance(candidate: RetrievalCandidate) -> tuple[str, str, str | None, str, str]:
+    """Return fields whose replacement could change an evidence authorization claim."""
+
+    return (
+        candidate.resource_id,
+        candidate.document_id,
+        candidate.tenant_id,
+        candidate.source_url,
+        candidate.source_revision,
+    )

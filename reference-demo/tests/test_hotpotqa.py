@@ -67,6 +67,10 @@ def _manifest(payload: bytes) -> HotpotManifest:
                 "sha256": hashlib.sha256(payload).hexdigest(),
             },
             "subset": {"size": 1, "selection": "bridge"},
+            "retrieval_quality_gate": {
+                "supporting_title_recall_at_k": 1.0,
+                "answer_evidence_coverage_at_k": 1.0,
+            },
         }
     )
 
@@ -88,7 +92,7 @@ def test_verified_hotpotqa_subset_and_overlay_preserve_the_source_data(tmp_path)
     assert report.benign_acceptance_rate == 1
     assert retrieval.supporting_title_recall_at_k == 1
     assert retrieval.answer_evidence_coverage_at_k == 1
-    validate_hotpotqa_evaluation(retrieval)
+    validate_hotpotqa_evaluation(retrieval, _manifest(payload).retrieval_quality_gate)
     scope_traces = asyncio.run(evaluate_hotpotqa_scope_overlay(cases, overlays, limit=2))
     assert scope_traces[0].candidate_resource_ids == ("hotpot:b:0",)
     assert scope_traces[0].poisoned_proposal_rejected
@@ -114,9 +118,15 @@ def test_verified_hotpotqa_subset_and_overlay_preserve_the_source_data(tmp_path)
         validate_hotpotqa_scope_controls(regressed)
 
     with pytest.raises(ValueError, match="supporting-title recall"):
-        validate_hotpotqa_evaluation(replace(retrieval, supporting_title_recall_at_k=0.0))
+        validate_hotpotqa_evaluation(
+            replace(retrieval, supporting_title_recall_at_k=0.0),
+            _manifest(payload).retrieval_quality_gate,
+        )
     with pytest.raises(ValueError, match="complete supporting-evidence coverage"):
-        validate_hotpotqa_evaluation(replace(retrieval, answer_evidence_coverage_at_k=0.0))
+        validate_hotpotqa_evaluation(
+            replace(retrieval, answer_evidence_coverage_at_k=0.0),
+            _manifest(payload).retrieval_quality_gate,
+        )
 
 
 def test_hotpotqa_loader_rejects_a_hash_mismatch(tmp_path) -> None:
@@ -143,6 +153,27 @@ def test_hotpot_backend_applies_tenant_and_resource_filters_conjunctively() -> N
     candidates = backend("shared", filters=filters, limit=10)
 
     assert [candidate.chunk_id for candidate in candidates] == ["acme"]
+
+
+def test_hotpotqa_utility_gate_rejects_an_actual_ranking_regression(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    payload = _dataset()
+    path = tmp_path / "hotpot.json"
+    path.write_bytes(payload)
+    cases = load_cases(path, _manifest(payload))
+    overlay = evaluate_overlay(cases, build_overlay(cases), hashlib.sha256(payload).hexdigest())
+
+    monkeypatch.setattr(
+        hotpot_evaluation.AccessGatedBm25Retriever,
+        "_rank",
+        staticmethod(lambda query, chunks, limit: ()),
+    )
+    report = evaluate_hotpotqa_retrieval(cases, overlay, limit=2)
+
+    assert report.supporting_title_recall_at_k == 0
+    with pytest.raises(ValueError, match="supporting-title recall"):
+        validate_hotpotqa_evaluation(report, _manifest(payload).retrieval_quality_gate)
 
 
 def test_hotpotqa_scope_gate_detects_an_actual_benign_follow_up_exposure(
@@ -214,6 +245,9 @@ def test_hotpotqa_cli_reports_all_three_controls(tmp_path) -> None:
                 "subset:",
                 "  size: 1",
                 "  selection: bridge",
+                "retrieval_quality_gate:",
+                "  supporting_title_recall_at_k: 1.0",
+                "  answer_evidence_coverage_at_k: 1.0",
             )
         )
     )

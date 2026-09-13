@@ -37,6 +37,7 @@ class EvaluationCaseSpec(BaseModel):
     required_resources: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
     retry_eligible: bool = False
+    max_retrieval_hops: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_mode_contract(self) -> Self:
@@ -58,6 +59,19 @@ class EvaluationCaseSpec(BaseModel):
         ):
             raise ValueError("cited answers require expected source or resource evidence")
         return self
+
+    @property
+    def retrieval_hop_budget(self) -> int:
+        """Return this case's explicit or mode-safe host retrieval budget."""
+
+        if self.max_retrieval_hops is not None:
+            return self.max_retrieval_hops
+        if self.mode is RequestMode.PERMISSION:
+            return 0
+        if self.mode is RequestMode.PUBLIC_DOCUMENTATION:
+            return 1
+        # The bounded reference host may make one scope-preserving follow-up.
+        return 2
 
 
 class LexicalQualityGate(BaseModel):

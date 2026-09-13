@@ -15,6 +15,10 @@ source:
 subset:
   size: 50
   selection: first 50 bridge questions after sorting by _id
+retrieval_quality_gate:
+  # Measured against these exact pinned bytes, subset, and k=5.
+  supporting_title_recall_at_k: 0.83
+  answer_evidence_coverage_at_k: 0.68
 overlay:
   tenant_assignment: deterministic hash of supporting title
   protected_tenant: tenant:beta

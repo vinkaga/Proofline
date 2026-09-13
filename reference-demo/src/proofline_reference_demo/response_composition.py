@@ -27,19 +27,22 @@ def compose_response(query: str, candidates: tuple[RetrievalCandidate, ...]) -> 
             citations=(),
             abstained=True,
         )
-    primary = candidates[0]
-    if not primary.source_url or not primary.source_revision:
+    if any(not candidate.source_url or not candidate.source_revision for candidate in candidates):
         raise ValueError("citation-ready candidates require source URL and revision")
     return ComposedResponse(
         text=f"Retrieved permitted evidence for: {query}",
-        citations=(
+        # Retain the complete evidence set considered by this deterministic
+        # host.  A release case can therefore check that each required source
+        # was actually cited instead of merely present somewhere in retrieval.
+        citations=tuple(
             Citation.model_validate(
                 {
-                    "chunk_id": primary.chunk_id,
-                    "source_url": primary.source_url,
-                    "source_revision": primary.source_revision,
+                    "chunk_id": candidate.chunk_id,
+                    "source_url": candidate.source_url,
+                    "source_revision": candidate.source_revision,
                 }
-            ),
+            )
+            for candidate in candidates
         ),
         abstained=False,
     )

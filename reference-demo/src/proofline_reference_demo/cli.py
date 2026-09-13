@@ -513,7 +513,7 @@ def evaluate_hotpotqa(
         )
     )
     try:
-        validate_hotpotqa_evaluation(report)
+        validate_hotpotqa_evaluation(report, benchmark.retrieval_quality_gate)
         validate_hotpotqa_scope_overlay(scope_traces)
         validate_hotpotqa_scope_controls(controls)
     except ValueError as error:

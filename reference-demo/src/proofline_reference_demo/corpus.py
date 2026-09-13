@@ -11,6 +11,7 @@ import json
 import re
 from dataclasses import asdict
 from datetime import date
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
@@ -38,6 +39,7 @@ class ManifestDocument(BaseModel):
     path: Path
     url: HttpUrl
     visibility: Literal["public", "protected"]
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class CorpusManifest(BaseModel):
@@ -109,13 +111,20 @@ def build_corpus(
     source_root: Path,
     assignments: AccessAssignments,
 ) -> tuple[DocumentChunk, ...]:
-    """Create deterministic public chunks with source revision and URL provenance."""
+    """Create chunks only from source bytes pinned by the manifest."""
 
     validate_corpus_configuration(manifest, assignments)
     chunks: list[DocumentChunk] = []
     for document in manifest.documents:
         source_path = source_root / document.path
-        raw_content = source_path.read_text()
+        raw_bytes = source_path.read_bytes()
+        actual_sha256 = sha256(raw_bytes).hexdigest()
+        if actual_sha256 != document.sha256:
+            raise ValueError(
+                f"source hash mismatch for {document.path}: "
+                f"expected {document.sha256}, got {actual_sha256}"
+            )
+        raw_content = raw_bytes.decode()
         content = _FRONT_MATTER.sub("", raw_content).strip()
         retrieval_context = _front_matter_retrieval_context(raw_content)
         for index, paragraph in enumerate(_PARAGRAPH.split(content), start=1):

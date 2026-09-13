@@ -3,6 +3,7 @@
 """Verify deterministic corpus construction and provenance preservation."""
 
 import json
+from hashlib import sha256
 
 import pytest
 from pydantic import ValidationError
@@ -19,9 +20,8 @@ from proofline_reference_demo.corpus import (
 def test_build_corpus_strips_front_matter_and_preserves_provenance(tmp_path) -> None:
     source = tmp_path / "docs" / "content"
     source.mkdir(parents=True)
-    (source / "example.mdx").write_text(
-        "---\ntitle: Example\n---\n\nFirst paragraph.\n\nSecond paragraph."
-    )
+    content = "---\ntitle: Example\n---\n\nFirst paragraph.\n\nSecond paragraph."
+    (source / "example.mdx").write_text(content)
     manifest = CorpusManifest.model_validate(
         {
             "version": "test-v0",
@@ -38,6 +38,7 @@ def test_build_corpus_strips_front_matter_and_preserves_provenance(tmp_path) -> 
                     "path": "docs/content/example.mdx",
                     "url": "https://openfga.dev/docs/example",
                     "visibility": "public",
+                    "sha256": sha256(content.encode()).hexdigest(),
                 }
             ],
         }
@@ -49,6 +50,35 @@ def test_build_corpus_strips_front_matter_and_preserves_provenance(tmp_path) -> 
     assert chunks[0].content == "First paragraph."
     assert chunks[0].search_context == "Example"
     assert chunks[0].source_revision == "a" * 40
+
+
+def test_build_corpus_rejects_bytes_that_do_not_match_the_manifest(tmp_path) -> None:
+    source = tmp_path / "example.mdx"
+    source.write_text("changed")
+    manifest = CorpusManifest.model_validate(
+        {
+            "version": "test-v0",
+            "retrieved_at": "2026-09-03",
+            "access_assignments": "data/access/resource-assignments.yaml",
+            "source": {
+                "repository": "https://example.test/repo",
+                "revision": "a" * 40,
+                "license": "MIT",
+            },
+            "documents": [
+                {
+                    "id": "example",
+                    "path": "example.mdx",
+                    "url": "https://example.test/example",
+                    "visibility": "public",
+                    "sha256": sha256(b"expected").hexdigest(),
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="source hash mismatch"):
+        build_corpus(manifest, tmp_path, AccessAssignments(version="test", assignments=()))
 
 
 def test_write_corpus_emits_json_lines(tmp_path) -> None:
@@ -116,6 +146,7 @@ def test_protected_document_requires_assignment(tmp_path) -> None:
                     "path": "secret.mdx",
                     "url": "https://example.test/secret",
                     "visibility": "protected",
+                    "sha256": "a" * 64,
                 }
             ],
         }
@@ -173,12 +204,14 @@ def test_manifest_document_ids_must_be_unique() -> None:
                     "path": "first.mdx",
                     "url": "https://example.test/first",
                     "visibility": "public",
+                    "sha256": "a" * 64,
                 },
                 {
                     "id": "duplicate",
                     "path": "second.mdx",
                     "url": "https://example.test/second",
                     "visibility": "public",
+                    "sha256": "b" * 64,
                 },
             ],
         }

@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Vinay Agarwal
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -12,6 +13,7 @@ from proofline import (
     ScopeError,
     ScopeExpiredError,
     ScopeValidationError,
+    offload_sync,
     scoped,
 )
 
@@ -91,6 +93,27 @@ def test_wrapper_accepts_an_async_trusted_scope_resolver() -> None:
     results = asyncio.run(retriever.search("query", context="user:ana"))
 
     assert results.scope.principal == "user:ana"
+
+
+def test_offload_sync_keeps_a_blocking_backend_off_the_event_loop() -> None:
+    def blocking_backend(query: str, *, filters: object, limit: int) -> list[str]:  # noqa: ARG001
+        time.sleep(0.05)
+        return [query]
+
+    retriever = scoped(
+        offload_sync(blocking_backend),
+        resolve_scope=lambda context: RetrievalScope.root(  # noqa: ARG005
+            principal="user:ana", filters={"resource_id": ["guide-a"]}
+        ),
+    )
+
+    async def run() -> None:
+        search = asyncio.create_task(retriever.search("query", context=None))
+        await asyncio.sleep(0.01)
+        assert not search.done()
+        assert (await search).items == ("query",)
+
+    asyncio.run(run())
 
 
 def test_proposed_follow_up_cannot_supply_authority() -> None:

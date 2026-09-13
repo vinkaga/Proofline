@@ -10,6 +10,7 @@ from proofline.retrieval import (
     ScopeResolver,
     ScopeValidationError,
     ScopeValidator,
+    offload_sync,
     scoped,
 )
 from proofline.scope import (
@@ -37,6 +38,7 @@ __all__ = [
     "ScopeValidationError",
     "ScopeResolver",
     "ScopeValidator",
+    "offload_sync",
     "FilteredSearch",
     "ScopedResults",
     "ScopedRetriever",

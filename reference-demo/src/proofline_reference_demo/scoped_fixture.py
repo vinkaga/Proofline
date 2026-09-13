@@ -66,7 +66,7 @@ def build_scoped_retriever(
     async def resolve_scope(context: DemoRequestContext) -> RetrievalScope:
         with trace_operation(
             "proofline.authorization.resolve_scope",
-            {"enduser.id": context.principal.id},
+            {"enduser.id": context.principal.id, "proofline.tenant_id": context.tenant_id},
         ):
             access_scope = await authorization.list_permitted_resources(
                 context.principal, context.tenant_id

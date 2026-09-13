@@ -325,6 +325,15 @@ request ID; metadata is propagated unchanged and is never used to grant
 retrieval authority.
 Underneath, the wrapper targets the ordinary Python retrieval shape: a sync or
 async callable/protocol that accepts `query`, enforced `filters`, and `limit`.
+Synchronous callbacks run on the calling event loop. For a thread-safe blocking
+SDK, explicitly opt into worker-thread execution with `offload_sync`; the host
+remains responsible for client thread affinity, timeout, and cancellation policy:
+
+```python
+from proofline import offload_sync, scoped
+
+retriever = scoped(offload_sync(existing_retriever.search), resolve_scope=resolve_scope)
+```
 It preserves the application's document/result model rather than imposing a
 new one.
 
@@ -663,6 +672,18 @@ separately.
 The offline baseline derives direct-viewer grants from the checked-in OpenFGA
 tuples; inherited relationship behavior remains covered by the OpenFGA backend
 and integration tests.
+
+Write the reviewed scope-propagation gate and its redacted clean, benign, and
+rejected-proposal traces to stable versioned paths:
+
+```bash
+uv run proofline-reference-demo report
+```
+
+This creates `artifacts/scope-propagation-v0/scope-propagation-v0-report.json`
+and `artifacts/scope-propagation-v0/scope-propagation-v0-traces.jsonl`. To
+persist the HotpotQA runtime overlay evidence as well, pass `--output` and
+`--traces-output` to `evaluate-hotpotqa`.
 
 With local Qdrant running, compare its access-filtered dense-vector control to
 BM25 on the same corpus and cases:

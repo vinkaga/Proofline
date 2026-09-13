@@ -14,6 +14,7 @@ from proofline import ProposedRetrievalStep, ProposedStepError, RetrievalScope, 
 from proofline_reference_demo.authorization import AuthorizationAdapter
 from proofline_reference_demo.domain import Principal
 from proofline_reference_demo.scoped_fixture import DemoRequestContext, build_scoped_fixture
+from proofline_reference_demo.tracing import trace_operation
 from proofline_reference_demo.vertical_slice import vertical_slice_chunks
 
 _POISON_MARKER = "PLANNER_FIXTURE: "
@@ -123,17 +124,28 @@ async def run_clean_two_hop(
         retrieval_hop_count += 1
 
     retriever = build_scoped_fixture(authorization, max_follow_ups=1, on_retrieval=count_retrieval)
-    initial = await retriever.search(
-        "acme rollout approval",
-        context=DemoRequestContext(principal=principal, tenant_id=tenant_id),
-    )
-    proposed = ProposedRetrievalStep.from_untrusted(
-        {
-            "query": "public release approval policy",
-            "parent_step_id": initial.scope.scope_id,
-        }
-    )
-    follow_up = await retriever.follow_proposed(initial, proposed)
+    with trace_operation("proofline.retrieval", {"proofline.hop": 0}) as span:
+        initial = await retriever.search(
+            "acme rollout approval",
+            context=DemoRequestContext(principal=principal, tenant_id=tenant_id),
+        )
+        span.set_attribute("proofline.scope.id", initial.scope.scope_id)
+        span.set_attribute("proofline.candidate_count", len(initial.items))
+    with trace_operation("proofline.planner.proposal", {"proofline.hop": 1}) as span:
+        proposed = ProposedRetrievalStep.from_untrusted(
+            {
+                "query": "public release approval policy",
+                "parent_step_id": initial.scope.scope_id,
+            }
+        )
+        span.set_attribute("proofline.proposal.accepted", True)
+    with trace_operation(
+        "proofline.retrieval",
+        {"proofline.hop": 1, "proofline.parent_scope_id": initial.scope.scope_id},
+    ) as span:
+        follow_up = await retriever.follow_proposed(initial, proposed)
+        span.set_attribute("proofline.scope.id", follow_up.scope.scope_id)
+        span.set_attribute("proofline.candidate_count", len(follow_up.items))
     return MultiHopTrace(
         scenario="clean",
         initial_candidate_ids=tuple(candidate.chunk_id for candidate in initial.items),
@@ -162,15 +174,26 @@ async def run_benign_two_hop(
         retrieval_hop_count += 1
 
     retriever = build_scoped_fixture(authorization, max_follow_ups=1, on_retrieval=count_retrieval)
-    initial = await retriever.search(
-        "public scope guidance",
-        context=DemoRequestContext(principal=principal, tenant_id=tenant_id),
-    )
+    with trace_operation("proofline.retrieval", {"proofline.hop": 0}) as span:
+        initial = await retriever.search(
+            "public scope guidance",
+            context=DemoRequestContext(principal=principal, tenant_id=tenant_id),
+        )
+        span.set_attribute("proofline.scope.id", initial.scope.scope_id)
+        span.set_attribute("proofline.candidate_count", len(initial.items))
     source_chunk_id, raw_proposal = _benign_proposal_from_initial(
         tuple(candidate.chunk_id for candidate in initial.items)
     )
-    proposed = ProposedRetrievalStep.from_untrusted(raw_proposal)
-    follow_up = await retriever.follow_proposed(initial, proposed)
+    with trace_operation("proofline.planner.proposal", {"proofline.hop": 1}) as span:
+        proposed = ProposedRetrievalStep.from_untrusted(raw_proposal)
+        span.set_attribute("proofline.proposal.accepted", True)
+    with trace_operation(
+        "proofline.retrieval",
+        {"proofline.hop": 1, "proofline.parent_scope_id": initial.scope.scope_id},
+    ) as span:
+        follow_up = await retriever.follow_proposed(initial, proposed)
+        span.set_attribute("proofline.scope.id", follow_up.scope.scope_id)
+        span.set_attribute("proofline.candidate_count", len(follow_up.items))
     return MultiHopTrace(
         scenario="benign",
         initial_candidate_ids=tuple(candidate.chunk_id for candidate in initial.items),
@@ -196,23 +219,32 @@ async def run_poisoned_two_hop(
         retrieval_hop_count += 1
 
     retriever = build_scoped_fixture(authorization, max_follow_ups=1, on_retrieval=count_retrieval)
-    initial = await retriever.search(
-        "acme rollout approval",
-        context=DemoRequestContext(principal=principal, tenant_id=tenant_id),
-    )
+    with trace_operation("proofline.retrieval", {"proofline.hop": 0}) as span:
+        initial = await retriever.search(
+            "acme rollout approval",
+            context=DemoRequestContext(principal=principal, tenant_id=tenant_id),
+        )
+        span.set_attribute("proofline.scope.id", initial.scope.scope_id)
+        span.set_attribute("proofline.candidate_count", len(initial.items))
     source_chunk_id, raw_proposal = poisoned_proposal_from_initial(
         tuple(candidate.chunk_id for candidate in initial.items)
     )
-    try:
-        ProposedRetrievalStep.from_untrusted(raw_proposal)
-    except ProposedStepError as error:
-        return MultiHopTrace(
-            scenario="poisoned",
-            initial_candidate_ids=tuple(candidate.chunk_id for candidate in initial.items),
-            follow_up_candidate_ids=(),
-            scopes=(_scope_trace(initial.scope),),
-            retrieval_hop_count=retrieval_hop_count,
-            proposal_source_chunk_id=source_chunk_id,
-            rejected_fields=error.fields,
-        )
-    raise AssertionError("the poisoned fixture must be rejected")
+    rejected_fields: tuple[str, ...]
+    with trace_operation("proofline.planner.proposal", {"proofline.hop": 1}) as span:
+        try:
+            ProposedRetrievalStep.from_untrusted(raw_proposal)
+        except ProposedStepError as error:
+            span.set_attribute("proofline.proposal.accepted", False)
+            span.set_attribute("proofline.rejected_field_count", len(error.fields))
+            rejected_fields = error.fields
+        else:
+            raise AssertionError("the poisoned fixture must be rejected")
+    return MultiHopTrace(
+        scenario="poisoned",
+        initial_candidate_ids=tuple(candidate.chunk_id for candidate in initial.items),
+        follow_up_candidate_ids=(),
+        scopes=(_scope_trace(initial.scope),),
+        retrieval_hop_count=retrieval_hop_count,
+        proposal_source_chunk_id=source_chunk_id,
+        rejected_fields=rejected_fields,
+    )

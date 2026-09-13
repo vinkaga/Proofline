@@ -57,6 +57,46 @@ async def run_bounded_host(
 ) -> BoundedHostTrace:
     """Classify, authorize or retrieve, then cite or abstain with a fixed budget."""
 
+    with trace_operation(
+        "proofline.request",
+        {
+            "enduser.id": principal.id,
+            "proofline.tenant_id": tenant_id,
+            "proofline.query_length": len(query),
+        },
+    ) as request_span:
+        result = await _run_bounded_host(
+            authorization,
+            principal=principal,
+            tenant_id=tenant_id,
+            query=query,
+            relation=relation,
+            resource_id=resource_id,
+            chunks=chunks,
+            request_mode=request_mode,
+        )
+        request_span.set_attribute("proofline.request_mode", result.request_mode.value)
+        request_span.set_attribute("proofline.scope.count", len(result.scope_ids))
+        if result.scope_ids:
+            request_span.set_attribute("proofline.scope.ids", result.scope_ids)
+        request_span.set_attribute("proofline.candidate_count", len(result.candidate_chunk_ids))
+        request_span.set_attribute("proofline.abstained", result.abstained)
+        return result
+
+
+async def _run_bounded_host(
+    authorization: AuthorizationAdapter,
+    *,
+    principal: Principal,
+    tenant_id: str,
+    query: str,
+    relation: str = "viewer",
+    resource_id: str | None = None,
+    chunks: tuple[DocumentChunk, ...] | None = None,
+    request_mode: RequestMode | None = None,
+) -> BoundedHostTrace:
+    """Execute one request inside the request span created by the public entry point."""
+
     with trace_operation("proofline.request.classify", {"proofline.query_length": len(query)}):
         mode = request_mode or classify_request(query)
     transitions = ["classified"]
@@ -100,7 +140,11 @@ async def run_bounded_host(
         retrieval_hop_count += 1
 
     if mode is RequestMode.PUBLIC_DOCUMENTATION:
-        candidates = _retrieve_public_documentation(query, chunks or vertical_slice_chunks())
+        with trace_operation(
+            "proofline.retrieval", {"proofline.hop": 0, "proofline.public_corpus": True}
+        ) as span:
+            candidates = _retrieve_public_documentation(query, chunks or vertical_slice_chunks())
+            span.set_attribute("proofline.candidate_count", len(candidates))
         response = compose_response(query, candidates)
         return _response_trace(
             mode,
@@ -125,11 +169,13 @@ async def run_bounded_host(
     with trace_operation(
         "proofline.retrieval",
         {"proofline.hop": 0, "enduser.id": principal.id},
-    ):
+    ) as span:
         initial = await retriever.search(
             query,
             context=DemoRequestContext(principal=principal, tenant_id=tenant_id),
         )
+        span.set_attribute("proofline.scope.id", initial.scope.scope_id)
+        span.set_attribute("proofline.candidate_count", len(initial.items))
     transitions.append("retrieved")
     candidates = initial.items
     scope_ids = [initial.scope.scope_id]
@@ -142,8 +188,13 @@ async def run_bounded_host(
                     "parent_step_id": initial.scope.scope_id,
                 }
             )
-        with trace_operation("proofline.retrieval", {"proofline.hop": 1}):
+        with trace_operation(
+            "proofline.retrieval",
+            {"proofline.hop": 1, "proofline.parent_scope_id": initial.scope.scope_id},
+        ) as span:
             follow_up = await retriever.follow_proposed(initial, proposed)
+            span.set_attribute("proofline.scope.id", follow_up.scope.scope_id)
+            span.set_attribute("proofline.candidate_count", len(follow_up.items))
         candidates = _unique_candidates(candidates + follow_up.items)
         scope_ids.append(follow_up.scope.scope_id)
         transitions.append("followed_up")

@@ -10,11 +10,11 @@ reviewer from mistaking scaffolding for a completed capability.
 import asyncio
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
 from qdrant_client import QdrantClient
@@ -595,29 +595,27 @@ def evaluate_hotpotqa(
     manifest: Annotated[Path, typer.Option(exists=True)] = Path(
         "data/benchmarks/hotpotqa-distractor-dev.yaml"
     ),
+    output: Annotated[Path | None, typer.Option()] = None,
+    traces_output: Annotated[Path | None, typer.Option()] = None,
 ) -> None:
     """Verify the pinned HotpotQA subset and its separate security overlay."""
 
     benchmark = load_hotpotqa_manifest(manifest)
     cases = load_hotpotqa_cases(dataset, benchmark)
-    overlay = evaluate_overlay(cases, build_overlay(cases), benchmark.source.sha256)
+    overlays = build_overlay(cases, benchmark.overlay)
+    overlay = evaluate_overlay(cases, overlays, benchmark.source.sha256)
     report = evaluate_hotpotqa_retrieval(cases, overlay)
-    scope_traces = asyncio.run(evaluate_hotpotqa_scope_overlay(cases, build_overlay(cases)))
+    scope_traces = asyncio.run(evaluate_hotpotqa_scope_overlay(cases, overlays))
     controls = evaluate_hotpotqa_scope_controls(scope_traces)
-    typer.echo(
-        json.dumps(
-            {
-                "retrieval": asdict(report),
-                "scope_overlay": {
-                    "trace_count": len(scope_traces),
-                    "configurations": [
-                        asdict(configuration) for configuration in controls.configurations
-                    ],
-                },
-            },
-            indent=2,
-        )
-    )
+    payload = {
+        "version": benchmark.version,
+        "retrieval": asdict(report),
+        "scope_overlay": {
+            "trace_count": len(scope_traces),
+            "configurations": [asdict(configuration) for configuration in controls.configurations],
+        },
+    }
+    typer.echo(json.dumps(payload, indent=2))
     try:
         validate_hotpotqa_evaluation(report, benchmark.retrieval_quality_gate)
         validate_hotpotqa_scope_overlay(scope_traces)
@@ -625,10 +623,43 @@ def evaluate_hotpotqa(
     except ValueError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
+    if output is not None:
+        _write_json(payload, output)
+    if traces_output is not None:
+        _write_jsonl((asdict(trace) for trace in scope_traces), traces_output)
 
 
 @app.command()
-def report() -> None:
-    """Generate a static evaluation report. Available in Phase 8."""
+def report(
+    output_dir: Annotated[Path, typer.Option()] = Path("artifacts/scope-propagation-v0"),
+) -> None:
+    """Write a versioned scope-gate report and redacted representative traces."""
 
-    _not_available("report", phase=8)
+    scope_report = asyncio.run(
+        evaluate_scope_propagation(StaticAuthorizationAdapter(load_static_permissions()))
+    )
+    try:
+        validate_scope_propagation(scope_report)
+    except ScopeGateError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    payload = scope_report.as_dict()
+    report_path = output_dir / f"{scope_report.version}-report.json"
+    traces_path = output_dir / f"{scope_report.version}-traces.jsonl"
+    _write_json(payload, report_path)
+    _write_jsonl(cast(list[object], payload["traces"]), traces_path)
+    typer.echo(f"Wrote {report_path} and {traces_path}")
+
+
+def _write_json(payload: object, output: Path) -> None:
+    """Persist a stable, pretty-printed public evidence artifact."""
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _write_jsonl(rows: Iterable[object], output: Path) -> None:
+    """Persist redacted per-case evidence with one stable JSON object per line."""
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows))

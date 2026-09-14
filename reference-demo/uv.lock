@@ -2038,7 +2038,7 @@ wheels = [
 
 [[package]]
 name = "scopeanchor"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "../" }
 
 [package.metadata]
@@ -2054,7 +2054,7 @@ dev = [
 
 [[package]]
 name = "scopeanchor-reference-demo"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },

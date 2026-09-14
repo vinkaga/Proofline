@@ -4,7 +4,7 @@
 
 [project]
 name = "scopeanchor-reference-demo"
-version = "0.1.0"
+version = "0.1.1"
 description = "Public-data evaluation and demonstration for ScopeAnchor."
 readme = "README.md"
 requires-python = ">=3.13"

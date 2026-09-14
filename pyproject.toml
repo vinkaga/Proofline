@@ -3,7 +3,7 @@
 
 [project]
 name = "scopeanchor"
-version = "0.1.0"
+version = "0.1.1"
 description = "Keep multi-hop retrieval anchored to the caller's authorized scope."
 readme = "README.md"
 requires-python = ">=3.10"

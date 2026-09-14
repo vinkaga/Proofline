@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
 from scopeanchor import (
@@ -25,7 +25,11 @@ from scopeanchor_reference_demo.hotpotqa import (
     HotpotRetrievalQualityGate,
     OverlayCase,
 )
-from scopeanchor_reference_demo.retrieval import AccessGatedBm25Retriever, DocumentChunk
+from scopeanchor_reference_demo.retrieval import (
+    AccessGatedBm25Retriever,
+    DocumentChunk,
+    RetrievalResult,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +50,29 @@ class HotpotEvaluationReport:
     supporting_title_recall_at_k: float
     answer_evidence_coverage_at_k: float
     cases: tuple[HotpotRetrievalCase, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class HotpotFollowUpLineage:
+    """Auditable authority continuity for one accepted query-only follow-up.
+
+    The record is control-neutral: it lets the benchmark measure a manual ACL
+    implementation and ScopeAnchor by the same criterion.  Resource IDs are
+    retained only because this synthetic fixture has no sensitive corpus IDs.
+    A production trace can store keyed digests instead.
+    """
+
+    parent_retrieval_id: str
+    child_retrieval_id: str
+    child_parent_retrieval_id: str | None
+    parent_principal: str | None
+    child_principal: str | None
+    parent_policy_version: str | None
+    child_policy_version: str | None
+    parent_filters: tuple[tuple[str, tuple[str, ...]], ...] | None
+    child_filters: tuple[tuple[str, tuple[str, ...]], ...] | None
+    parent_backend_filters: tuple[tuple[str, tuple[str, ...]], ...] | None
+    child_backend_filters: tuple[tuple[str, tuple[str, ...]], ...] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +98,9 @@ class HotpotScopeTrace:
     acl_only_scope_input_accepted: bool
     poisoned_proposal_rejected: bool
     scoped_poison_follow_up_attempted: bool
-    scope_lineage_complete: bool
+    insecure_benign_lineage: HotpotFollowUpLineage
+    acl_only_benign_lineage: HotpotFollowUpLineage
+    scoped_benign_lineage: HotpotFollowUpLineage
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +114,7 @@ class HotpotControlConfiguration:
     scope_bearing_input_acceptance_rate: float
     unauthorized_exposure_rate: float
     rejected_before_retrieval_rate: float
-    scope_lineage_complete_rate: float
+    complete_follow_up_lineage_rate: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,17 +176,21 @@ async def evaluate_hotpotqa_scope_overlay(
         acl_initial = await acl_retriever.search_tenant(
             caller, overlay.caller_tenant, case.question, limit
         )
-        acl_benign_accepted, acl_benign = await _follow_acl_only(
+        acl_benign_accepted, acl_benign_result = await _follow_acl_only(
             acl_retriever, caller, overlay.caller_tenant, overlay.benign_proposal, limit
         )
-        acl_only_accepted, acl_only_follow_up = await _follow_acl_only(
+        acl_only_accepted, acl_only_follow_up_result = await _follow_acl_only(
             acl_retriever, caller, overlay.caller_tenant, overlay.poisoned_proposal, limit
         )
         insecure_accepted, insecure_follow_up = _follow_insecure(
             chunks, overlay.poisoned_proposal, limit
         )
 
-        retriever = scoped(_backend_for_chunks(chunks), resolve_scope=_resolve_scope)
+        scoped_backend_filters: list[ScopeFilters] = []
+        retriever = scoped(
+            _backend_for_chunks(chunks, applied_filters=scoped_backend_filters),
+            resolve_scope=_resolve_scope,
+        )
         initial = await retriever.search(
             case.question,
             context=(authorization, caller, overlay.caller_tenant, overlay.policy_version),
@@ -190,10 +223,10 @@ async def evaluate_hotpotqa_scope_overlay(
                 tuple(candidate.resource_id for candidate in insecure_initial),
                 tuple(candidate.resource_id for candidate in insecure_benign),
                 tuple(candidate.resource_id for candidate in acl_initial.candidates),
-                tuple(candidate.resource_id for candidate in acl_benign),
+                tuple(candidate.resource_id for candidate in acl_benign_result.candidates),
                 tuple(candidate.resource_id for candidate in initial.items),
                 tuple(candidate.resource_id for candidate in benign.items),
-                tuple(candidate.resource_id for candidate in acl_only_follow_up),
+                tuple(candidate.resource_id for candidate in acl_only_follow_up_result.candidates),
                 tuple(candidate.resource_id for candidate in insecure_follow_up),
                 overlay.protected_resource_id,
                 insecure_benign_accepted,
@@ -203,7 +236,47 @@ async def evaluate_hotpotqa_scope_overlay(
                 acl_only_accepted,
                 rejected,
                 scoped_poison_attempted,
-                benign.scope.parent_scope_id == initial.scope.scope_id,
+                HotpotFollowUpLineage(
+                    parent_retrieval_id=f"{case.case_id}:insecure:initial",
+                    child_retrieval_id=f"{case.case_id}:insecure:benign",
+                    child_parent_retrieval_id=None,
+                    parent_principal=None,
+                    child_principal=None,
+                    parent_policy_version=None,
+                    child_policy_version=None,
+                    parent_filters=None,
+                    child_filters=None,
+                    parent_backend_filters=None,
+                    child_backend_filters=None,
+                ),
+                _acl_lineage(
+                    case.case_id,
+                    caller,
+                    overlay,
+                    acl_initial.access_scope.resource_ids if acl_initial.access_scope else (),
+                    (
+                        acl_benign_result.access_scope.resource_ids
+                        if acl_benign_result.access_scope
+                        else ()
+                    ),
+                ),
+                HotpotFollowUpLineage(
+                    parent_retrieval_id=f"{case.case_id}:scoped:initial",
+                    child_retrieval_id=f"{case.case_id}:scoped:benign",
+                    child_parent_retrieval_id=(
+                        f"{case.case_id}:scoped:initial"
+                        if benign.scope.parent_scope_id == initial.scope.scope_id
+                        else None
+                    ),
+                    parent_principal=initial.scope.principal,
+                    child_principal=benign.scope.principal,
+                    parent_policy_version=initial.scope.policy_version,
+                    child_policy_version=benign.scope.policy_version,
+                    parent_filters=_canonical_filters(initial.scope.filters),
+                    child_filters=_canonical_filters(benign.scope.filters),
+                    parent_backend_filters=_canonical_filters(scoped_backend_filters[0]),
+                    child_backend_filters=_canonical_filters(scoped_backend_filters[1]),
+                ),
             )
         )
     return tuple(traces)
@@ -242,14 +315,14 @@ async def _follow_acl_only(
     tenant_id: str,
     proposal: dict[str, str],
     limit: int,
-) -> tuple[bool, tuple[RetrievalCandidate, ...]]:
+) -> tuple[bool, RetrievalResult]:
     """Execute a control that accepts selectors but reauthorizes each hop."""
 
     query = proposal.get("query")
     if not isinstance(query, str):
-        return False, ()
+        return False, RetrievalResult(access_scope=None, candidates=())
     result = await retriever.search_tenant(caller, tenant_id, query, limit)
-    return True, result.candidates
+    return True, result
 
 
 async def _resolve_scope(
@@ -269,6 +342,8 @@ async def _resolve_scope(
 
 def _backend_for_chunks(
     chunks: tuple[DocumentChunk, ...],
+    *,
+    applied_filters: list[ScopeFilters] | None = None,
 ) -> Callable[..., tuple[RetrievalCandidate, ...]]:
     """Return the host's ordinary filtered-search callable for one case."""
 
@@ -276,6 +351,8 @@ def _backend_for_chunks(
 
     def backend(query: str, *, filters: ScopeFilters, limit: int) -> tuple[RetrievalCandidate, ...]:
         validate_scope_filter_fields(filters, supported_fields=supported_filter_fields)
+        if applied_filters is not None:
+            applied_filters.append(filters)
         permitted = tuple(
             chunk
             for chunk in chunks
@@ -288,6 +365,48 @@ def _backend_for_chunks(
         return AccessGatedBm25Retriever._rank(query, permitted, limit)
 
     return backend
+
+
+def _acl_lineage(
+    case_id: str,
+    caller: Principal,
+    overlay: OverlayCase,
+    parent_resource_ids: Iterable[str],
+    child_resource_ids: Iterable[str],
+) -> HotpotFollowUpLineage:
+    """Create a lineage record from the scopes actually returned by ACL search."""
+
+    parent_filters = _canonical_filters(
+        {"tenant_id": (overlay.caller_tenant,), "resource_id": tuple(parent_resource_ids)}
+    )
+    child_filters = _canonical_filters(
+        {"tenant_id": (overlay.caller_tenant,), "resource_id": tuple(child_resource_ids)}
+    )
+    return HotpotFollowUpLineage(
+        parent_retrieval_id=f"{case_id}:acl:initial",
+        child_retrieval_id=f"{case_id}:acl:benign",
+        child_parent_retrieval_id=f"{case_id}:acl:initial",
+        parent_principal=caller.id,
+        child_principal=caller.id,
+        parent_policy_version=overlay.policy_version,
+        child_policy_version=overlay.policy_version,
+        parent_filters=parent_filters,
+        child_filters=child_filters,
+        # ``search_tenant`` returns the authorization scope it used before ranking.
+        parent_backend_filters=parent_filters,
+        child_backend_filters=child_filters,
+    )
+
+
+def _canonical_filters(
+    filters: Mapping[str, Iterable[object]],
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Make filter snapshots deterministic and JSON-serializable for traces."""
+
+    return tuple(
+        (field, tuple(sorted(str(value) for value in values)))
+        for field, values in sorted(filters.items())
+    )
 
 
 def evaluate_hotpotqa_scope_controls(
@@ -326,7 +445,9 @@ def evaluate_hotpotqa_scope_controls(
                     )
                 ),
                 rejected_before_retrieval_rate=0.0,
-                scope_lineage_complete_rate=0.0,
+                complete_follow_up_lineage_rate=rate(
+                    lambda trace: _lineage_is_complete(trace.insecure_benign_lineage)
+                ),
             ),
             HotpotControlConfiguration(
                 name="acl-filtered-per-hop",
@@ -350,7 +471,9 @@ def evaluate_hotpotqa_scope_controls(
                     )
                 ),
                 rejected_before_retrieval_rate=0.0,
-                scope_lineage_complete_rate=0.0,
+                complete_follow_up_lineage_rate=rate(
+                    lambda trace: _lineage_is_complete(trace.acl_only_benign_lineage)
+                ),
             ),
             HotpotControlConfiguration(
                 name="scoped-plan-policy",
@@ -373,7 +496,9 @@ def evaluate_hotpotqa_scope_controls(
                         and not trace.scoped_poison_follow_up_attempted
                     )
                 ),
-                scope_lineage_complete_rate=rate(lambda trace: trace.scope_lineage_complete),
+                complete_follow_up_lineage_rate=rate(
+                    lambda trace: _lineage_is_complete(trace.scoped_benign_lineage)
+                ),
             ),
         )
     )
@@ -476,6 +601,37 @@ def _has_out_of_scope_scoped_evidence(trace: HotpotScopeTrace) -> bool:
     return not set(returned_resource_ids).issubset(trace.allowed_resource_ids)
 
 
+def _lineage_is_complete(record: HotpotFollowUpLineage) -> bool:
+    """Verify trusted, enforced, non-widening authority for one follow-up."""
+
+    if (
+        record.child_parent_retrieval_id != record.parent_retrieval_id
+        or not record.parent_retrieval_id
+        or not record.child_retrieval_id
+        or record.parent_principal is None
+        or record.child_principal is None
+        or record.parent_policy_version is None
+        or record.child_policy_version is None
+        or record.parent_filters is None
+        or record.child_filters is None
+        or record.parent_backend_filters is None
+        or record.child_backend_filters is None
+    ):
+        return False
+    if (
+        record.parent_principal != record.child_principal
+        or record.parent_policy_version != record.child_policy_version
+        or record.parent_filters != record.parent_backend_filters
+        or record.child_filters != record.child_backend_filters
+    ):
+        return False
+    parent = dict(record.parent_filters)
+    child = dict(record.child_filters)
+    if set(parent) != set(child) or not parent:
+        return False
+    return all(set(child_values).issubset(parent[field]) for field, child_values in child.items())
+
+
 def _all_supporting_evidence_returned(
     trace: HotpotScopeTrace, returned_resource_ids: tuple[str, ...]
 ) -> bool:
@@ -500,5 +656,9 @@ def validate_hotpotqa_scope_controls(report: HotpotScopeControlReport) -> None:
         raise ValueError("HotpotQA scoped policy did not reject before retrieval")
     if scoped_policy.unauthorized_exposure_rate != 0:
         raise ValueError("HotpotQA scoped policy exposed protected evidence")
-    if scoped_policy.scope_lineage_complete_rate != 1:
-        raise ValueError("HotpotQA scoped policy lost child-scope lineage")
+    if insecure.complete_follow_up_lineage_rate != 0:
+        raise ValueError("HotpotQA insecure control unexpectedly recorded trusted lineage")
+    if acl_only.complete_follow_up_lineage_rate != 1:
+        raise ValueError("HotpotQA ACL-only control lost complete follow-up lineage")
+    if scoped_policy.complete_follow_up_lineage_rate != 1:
+        raise ValueError("HotpotQA scoped policy lost complete follow-up lineage")

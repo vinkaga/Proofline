@@ -46,7 +46,7 @@ success rates. ACL filtering means applying access-control rules to each search.
 | --- | ---: | ---: | ---: |
 | Cases where no unauthorized evidence was exposed | 0% | 100% | 100% |
 | Proposals containing permission-setting fields rejected before search | 0% | 0% | 100% |
-| Follow-ups with a complete record of inherited access restrictions | 0% | 0% | 100% |
+| Accepted query-only follow-ups with a complete, verified lineage record | 0% | 100% | 100% |
 
 Permission-setting fields include a caller identity, tenant, or resource filter.
 These must come from trusted application code. The rejection measure applies
@@ -54,10 +54,20 @@ only to proposals containing those forbidden fields; ordinary query-only
 proposals remain accepted in the ScopeAnchor fixture.
 
 Both ACL filtering on every hop and ScopeAnchor prevent unauthorized evidence
-exposure in this fixture. ScopeAnchor also rejects invalid proposals before
-search and records how each follow-up inherits its access restrictions. These
-are additional enforcement and traceability properties, not a measured reduction
-in exposure compared with the ACL-filtered control.
+exposure in this fixture. It is not evidence that ScopeAnchor is safer than a
+correct manual ACL implementation. The table compares the three implementations
+in this fixture. ScopeAnchor provides proposal rejection and scope lineage
+through its API by default. A manual ACL implementation can provide equivalent
+evidence isolation, rejection policy, and audit records, but must explicitly
+implement and apply those behaviors across its retrieval paths.
+
+The lineage measure records a parent/child retrieval link, authenticated
+principal, policy version, effective filters, and the filters used by the
+backend. It verifies that the child filters are no broader than the parent.
+In this reference fixture, adding that record and verification to the ACL
+control required roughly 150--200 source lines, including regression tests;
+production effort also includes applying the same discipline to every
+retrieval, retry, branch, and resume path.
 
 ## Install
 
@@ -67,6 +77,66 @@ pip install scopeanchor
 
 For development from a repository checkout, install the core environment with
 `uv sync`.
+
+## Hello, ScopeAnchor
+
+See one scope-changing follow-up under three approaches. The tiny backend
+enforces the filter it receives. The unsafe path lets untrusted proposal data
+choose that filter. Both manual ACL filtering and ScopeAnchor use the caller's
+trusted filter; ScopeAnchor rejects the same scope-bearing proposal before a
+second backend call.
+
+```bash
+curl -O https://raw.githubusercontent.com/vinkaga/ScopeAnchor/main/examples/hello_scopeanchor.py
+python hello_scopeanchor.py
+```
+
+It runs the same two proposal types through each approach: one proposal that
+tries to set a resource filter and one data-only proposal.
+
+Key output:
+
+```text
+Unsafe: proposal controls the filter
+  Scope-bearing follow-up requests: Beta rollout plan
+  Result: Beta rollout plan
+  Unauthorized evidence was retrieved.
+
+Manual ACL filtering on every hop
+  Scope-bearing follow-up attempts to request: Beta rollout plan
+  Result: Acme rollout plan
+  Data-only follow-up
+  Result: Acme rollout plan
+  Scope-bearing fields: ignored; trusted code chose the filter
+
+ScopeAnchor
+  Scope-bearing follow-up requests: Beta rollout plan
+  Result: rejected before retrieval (resource_id)
+  Data-only follow-up
+  Result: Acme rollout plan
+  Inherited scope record: yes
+  Verified lineage record: yes
+
+Comparison for this one trace
+  Measure                                      Unsafe  ACL per hop  ScopeAnchor
+  No unauthorized evidence exposed             no      yes         yes
+  Scope-bearing proposal rejected before search no      no          yes
+  Query-only follow-up lineage complete         no      yes         yes
+
+Fair reading
+  The unsafe path leaks Beta because it lets untrusted data choose filters.
+  Manual ACL filtering and ScopeAnchor both prevent that leak here.
+  ScopeAnchor additionally rejects a scope-bearing proposal before search.
+  The ACL path reaches equivalent lineage only because this example explicitly
+  records and verifies it; each production retrieval path needs the same work.
+```
+
+This is a two-input demonstration, not the 50-case benchmark above. It shows
+that correct ACL filtering and ScopeAnchor both prevent exposure. ScopeAnchor
+provides a reusable boundary that rejects a scope-bearing proposal and records
+inherited scope lineage for an accepted data-only follow-up; these are API and
+integration properties, not a demonstrated security advantage over correct
+manual ACL filtering.
 
 ## Quickstart
 

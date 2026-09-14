@@ -78,6 +78,17 @@ pip install scopeanchor
 For development from a repository checkout, install the core environment with
 `uv sync`.
 
+### Lock-step release versions
+
+This repository versions the core package, reference demo, and example packages
+together. Update every `pyproject.toml` and regenerate every `uv.lock` through
+uv; do not edit lockfiles as text:
+
+```bash
+python scripts/set_versions.py 0.1.2
+python scripts/set_versions.py 0.1.2 --check
+```
+
 ## Hello, ScopeAnchor
 
 See one scope-changing follow-up under three approaches. The tiny backend

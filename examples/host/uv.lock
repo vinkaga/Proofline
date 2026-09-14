@@ -4,7 +4,7 @@ requires-python = ">=3.10"
 
 [[package]]
 name = "scopeanchor"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "../../" }
 
 [package.metadata]
@@ -20,7 +20,7 @@ dev = [
 
 [[package]]
 name = "scopeanchor-example-host"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "scopeanchor" },

@@ -27,8 +27,6 @@ from scopeanchor.scope import (
     validate_scope_filter_fields,
 )
 
-__version__ = "0.1.0"
-
 __all__ = [
     "RetrievalScope",
     "FilterAtom",

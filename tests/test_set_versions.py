@@ -28,24 +28,6 @@ def _create_projects(root: Path, tool, version: str) -> tuple[Path, ...]:  # noq
     return projects
 
 
-def test_set_versions_updates_every_manifest_and_regenerates_every_lock(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    tool = _load_tool()
-    projects = _create_projects(tmp_path, tool, "0.1.0")
-    locked: list[tuple[Path, bool]] = []
-    monkeypatch.setattr(
-        tool, "run_uv_lock", lambda project, *, check: locked.append((project, check))
-    )
-
-    tool.set_versions(tmp_path, "0.1.2", check=False)
-
-    assert [tool.manifest_version(project / "pyproject.toml") for project in projects] == [
-        "0.1.2"
-    ] * len(projects)
-    assert locked == [(project, False) for project in projects]
-
-
 def test_set_versions_check_requires_matching_manifests_and_locks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

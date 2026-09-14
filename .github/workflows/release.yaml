@@ -36,7 +36,7 @@ jobs:
           enable-cache: true
       - run: uv sync --all-groups
       - name: Confirm the tag matches the package version
-        run: test "${GITHUB_REF_NAME#v}" = "$(uv run python -c 'from scopeanchor import __version__; print(__version__)')"
+        run: test "${GITHUB_REF_NAME#v}" = "$(uv run python -c 'from importlib.metadata import version; print(version("scopeanchor"))')"
       - run: uv build
       - uses: actions/upload-artifact@v4
         with:

@@ -5,12 +5,6 @@ from pathlib import Path
 from subprocess import run
 from zipfile import ZipFile
 
-import scopeanchor
-
-
-def test_package_exposes_a_version() -> None:
-    assert scopeanchor.__version__ == "0.1.0"
-
 
 def test_built_wheel_includes_the_inline_typing_marker(tmp_path) -> None:
     """Downstream type checkers only see the marker when it is in the wheel."""

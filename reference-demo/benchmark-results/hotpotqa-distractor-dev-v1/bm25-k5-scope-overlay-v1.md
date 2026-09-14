@@ -32,10 +32,10 @@ insecure control is a test control: it treats the proposal's protected
 `resource_id` as an effective retrieval selector. It establishes that the
 fixture can expose protected evidence; it is not a deployable baseline.
 
-| Control | Accepts scope-bearing input | Protected-evidence exposure | Rejects before retrieval | Complete child-scope lineage |
+| Control | Accepts scope-bearing input | Protected-evidence exposure | Rejects before retrieval | Complete verified query-only follow-up lineage |
 | --- | ---: | ---: | ---: | ---: |
 | Insecure baseline | 1.000 | 1.000 | 0.000 | 0.000 |
-| ACL-filtered per hop | 1.000 | 0.000 | 0.000 | 0.000 |
+| ACL-filtered per hop | 1.000 | 0.000 | 0.000 | 1.000 |
 | ScopeAnchor scoped-plan policy | 0.000 | 0.000 | 1.000 | 1.000 |
 
 ## Interpretation
@@ -47,7 +47,12 @@ separately from the benchmark's source data. ACL filtering alone prevents
 exposure after an unsafe planner input has been accepted. ScopeAnchor adds the
 narrower property that the scope-bearing proposal is rejected before it can
 produce a second retrieval; ordinary data-only follow-up retains its
-child-scope lineage.
+child-scope lineage. The lineage measure is control-neutral: it requires a
+parent/child link, matching principal and policy version, the effective filters
+used at both hops, evidence that the backend received those filters, and
+non-widening child filters. ScopeAnchor returns the record through its scoped
+follow-up API; the ACL control emits and verifies the equivalent record in the
+fixture.
 
 Run the evaluation with:
 

@@ -111,9 +111,11 @@ def test_verified_hotpotqa_subset_and_overlay_preserve_the_source_data(tmp_path)
     insecure, acl_only, scoped_policy = controls.configurations
     assert insecure.unauthorized_exposure_rate == 1
     assert acl_only.unauthorized_exposure_rate == 0
+    assert insecure.complete_follow_up_lineage_rate == 0
+    assert acl_only.complete_follow_up_lineage_rate == 1
     assert scoped_policy.scope_bearing_input_acceptance_rate == 0
     assert scoped_policy.rejected_before_retrieval_rate == 1
-    assert scoped_policy.scope_lineage_complete_rate == 1
+    assert scoped_policy.complete_follow_up_lineage_rate == 1
     validate_hotpotqa_scope_controls(controls)
 
     regressed = replace(
@@ -126,6 +128,18 @@ def test_verified_hotpotqa_subset_and_overlay_preserve_the_source_data(tmp_path)
     )
     with pytest.raises(ValueError, match="did not reject before retrieval"):
         validate_hotpotqa_scope_controls(regressed)
+
+    incomplete_acl_trace = replace(
+        scope_traces[0],
+        acl_only_benign_lineage=replace(
+            scope_traces[0].acl_only_benign_lineage,
+            child_backend_filters=("not-the-recorded-filters",),
+        ),
+    )
+    incomplete_acl_controls = evaluate_hotpotqa_scope_controls((incomplete_acl_trace,))
+    assert incomplete_acl_controls.configurations[1].complete_follow_up_lineage_rate == 0
+    with pytest.raises(ValueError, match="ACL-only control lost complete follow-up lineage"):
+        validate_hotpotqa_scope_controls(incomplete_acl_controls)
 
     with pytest.raises(ValueError, match="supporting-title recall"):
         validate_hotpotqa_evaluation(
@@ -199,8 +213,8 @@ def test_hotpotqa_scope_gate_detects_an_actual_benign_follow_up_exposure(
     overlays = build_overlay(cases, _manifest(payload).overlay)
     original_backend_for_chunks = hotpot_evaluation._backend_for_chunks
 
-    def leaking_backend_for_chunks(chunks):  # noqa: ANN001
-        backend = original_backend_for_chunks(chunks)
+    def leaking_backend_for_chunks(chunks, *, applied_filters=None):  # noqa: ANN001
+        backend = original_backend_for_chunks(chunks, applied_filters=applied_filters)
         call_count = 0
 
         def leaking_backend(query, *, filters, limit):  # noqa: ANN001
